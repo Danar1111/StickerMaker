@@ -1,0 +1,41 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Executing remote ssh commands using ssh key
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            
+            cd /var/www/StickerMaker
+            
+            echo "Menarik kode terbaru dari GitHub..."
+            git pull origin main
+            
+            echo "Menginstal dependensi (npm install)..."
+            npm install
+            
+            echo "Membangun aplikasi (npm run build)..."
+            npm run build
+            
+            echo "Merestart aplikasi di PM2 (Port 3002)..."
+
+            pm2 restart sticker-maker || pm2 start npm --name "sticker-maker" -- start
+            
+            echo "Deployment Selesai!"
