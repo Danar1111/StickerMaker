@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Wand2, Image as ImageIcon, Sparkles, Download, Loader2, X, Lock, Maximize, ShieldCheck, LogOut, Upload, Zap, Trash2, Layers } from "lucide-react";
+import { Wand2, Image as ImageIcon, Sparkles, Download, Loader2, X, Lock, Maximize, ShieldCheck, LogOut, Upload, Zap, Trash2, Layers, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -55,6 +55,8 @@ export default function Home() {
   const [isManualBatchProcessing, setIsManualBatchProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isStyleOpen, setIsStyleOpen] = useState(false);
+  const styleDropdownRef = useRef<HTMLDivElement>(null);
 
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
@@ -67,6 +69,17 @@ export default function Home() {
     } else {
        setIsAuthenticated(false);
     }
+  }, []);
+
+  // Close style dropdown on click outside
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (styleDropdownRef.current && !styleDropdownRef.current.contains(e.target as Node)) {
+        setIsStyleOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   const [isVerifying, setIsVerifying] = useState(false);
@@ -408,11 +421,56 @@ export default function Home() {
             <div className="glass-panel p-6 rounded-2xl">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2"> <Wand2 className="w-5 h-5 text-indigo-400" /> Settings </h2>
               <div className="space-y-5">
-                <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Subject..." className="w-full glass-input rounded-xl p-4 min-h-[100px] resize-none" />
-                <select value={artStyle} onChange={(e) => setArtStyle(e.target.value)} className="w-full glass-input rounded-xl p-3"> {STYLES.map(s => <option key={s} value={s}>{s}</option>)} </select>
-                <div className="flex justify-between text-sm"><span>Batch Size</span><span className="text-indigo-400 font-bold">{batchSize}</span></div>
-                <input type="range" min="1" max="20" value={batchSize} onChange={(e) => setBatchSize(parseInt(e.target.value))} className="w-full" />
-                <div className="space-y-2"> {MODES.map(m => <button key={m.id} onClick={() => setMode(m.id)} className={clsx("w-full p-3 rounded-xl border flex items-center gap-3 transition-colors", mode === m.id ? "border-pink-500 bg-pink-500/10" : "border-white/10 hover:bg-white/5")}> <m.icon className="w-5 h-5 text-indigo-400" /> <div className="text-left"><div className="text-sm font-bold">{m.name}</div><div className="text-[10px] text-zinc-500 leading-tight">{m.desc}</div></div> </button>)} </div>
+                {/* Subject Input */}
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Subject / Prompt</label>
+                  <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Describe your sticker..." className="w-full glass-input rounded-xl p-4 min-h-[100px] resize-none text-sm" />
+                </div>
+
+                {/* Custom Art Style Dropdown */}
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Art Style</label>
+                  <div className="relative" ref={styleDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsStyleOpen(!isStyleOpen)}
+                      className="w-full glass-input rounded-xl p-3.5 flex items-center justify-between text-sm text-white hover:bg-white/5 transition-colors"
+                    >
+                      <span>{artStyle}</span>
+                      <ChevronDown className={clsx("w-4 h-4 text-zinc-500 transition-transform", isStyleOpen && "rotate-180")} />
+                    </button>
+                    {isStyleOpen && (
+                      <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-zinc-900 rounded-xl border border-white/10 shadow-2xl shadow-black/50 max-h-[280px] overflow-y-auto">
+                        {STYLES.map(s => (
+                          <button
+                            key={s}
+                            onClick={() => { setArtStyle(s); setIsStyleOpen(false); }}
+                            className={clsx(
+                              "w-full px-4 py-2.5 text-left text-sm transition-colors flex items-center gap-2",
+                              artStyle === s ? "bg-indigo-500/20 text-indigo-400 font-bold" : "text-zinc-300 hover:bg-white/5"
+                            )}
+                          >
+                            {artStyle === s && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />}
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Batch Size */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm"><span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Batch Size</span><span className="text-indigo-400 font-bold">{batchSize}</span></div>
+                  <input type="range" min="1" max="20" value={batchSize} onChange={(e) => setBatchSize(parseInt(e.target.value))} className="w-full" />
+                </div>
+
+                {/* AI Model Selection */}
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">AI Model</label>
+                  <div className="space-y-2"> {MODES.map(m => <button key={m.id} onClick={() => setMode(m.id)} className={clsx("w-full p-3 rounded-xl border flex items-center gap-3 transition-colors", mode === m.id ? "border-pink-500 bg-pink-500/10" : "border-white/10 hover:bg-white/5")}> <m.icon className="w-5 h-5 text-indigo-400" /> <div className="text-left"><div className="text-sm font-bold">{m.name}</div><div className="text-[10px] text-zinc-500 leading-tight">{m.desc}</div></div> </button>)} </div>
+                </div>
+
                 <button onClick={handleGenerate} disabled={isGenerating || !prompt.trim()} className="w-full py-4 rounded-xl bg-indigo-500 text-white font-bold disabled:opacity-50"> {isGenerating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Generate Batch"} </button>
               </div>
             </div>
@@ -432,7 +490,7 @@ export default function Home() {
                       className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-bold disabled:opacity-50 flex justify-center items-center gap-2 border border-white/10"
                     >
                        {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5 text-indigo-400" />}
-                       {globalUpscaleState === "COOLDOWN" && activeTab === "manual" ? `Tunggu (${upscaleCooldownTime}s)` : "Hapus BG Massal"}
+                       {globalUpscaleState === "COOLDOWN" ? `Tunggu (${upscaleCooldownTime}s)` : manualImages.some(m => m.isProcessing) ? "Memproses..." : "Hapus BG Massal"}
                     </button>
                     <button 
                       onClick={() => handleBatchManual("upscale")} 
@@ -440,7 +498,7 @@ export default function Home() {
                       className="w-full py-4 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-xl font-bold disabled:opacity-50 flex justify-center items-center gap-2 shadow-lg shadow-pink-500/10"
                     >
                        {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                       {globalUpscaleState === "COOLDOWN" && activeTab === "manual" ? `Jeda API (${upscaleCooldownTime}s)` : "Upscale 4K Massal"}
+                       {globalUpscaleState === "COOLDOWN" ? `Jeda API (${upscaleCooldownTime}s)` : manualImages.some(m => m.isUpscaling) ? "Memproses..." : "Upscale 4K Massal"}
                     </button>
                  </div>
                  <button onClick={() => setManualImages([])} disabled={manualImages.length === 0} className="w-full py-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold flex justify-center items-center gap-2">
