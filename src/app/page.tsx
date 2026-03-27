@@ -208,7 +208,8 @@ export default function Home() {
         const canvas = document.createElement("canvas");
         canvas.width = w; canvas.height = h;
         canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL("image/png");
+        // JPEG 0.95 (visually lossless) — ~300KB vs PNG ~2700KB. Hasil dari Replicate tetap PNG transparan.
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
         
         setManualImages(prev => [
           ...prev, 
