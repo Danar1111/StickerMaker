@@ -77,13 +77,19 @@ export async function POST(req: Request) {
         const replicateToken = process.env.REPLICATE_API_TOKEN;
         const openaiKey = process.env.OPENAI_API_KEY;
         const adminPin = process.env.ADMIN_PIN;
+        const requestedPin = req.headers.get("x-admin-pin");
 
-        // --- SISTEM KEAMANAN PIN RAHASIA ---
-        if (adminPin) {
-            const requestedPin = req.headers.get("x-admin-pin");
-            if (requestedPin !== adminPin) {
-                return NextResponse.json({ error: "Unauthorized: PIN Akses Administrator salah atau Anda belum login." }, { status: 401 });
-            }
+        // --- SISTEM KEAMANAN PIN RAHASIA (MANDATORY) ---
+        if (!adminPin) {
+            return NextResponse.json({ 
+                error: "KESALAHAN KONFIGURASI VPS: Anda belum memasukkan 'ADMIN_PIN' di file .env.local pada server VPS Anda. Mohon isi PIN dan restart PM2." 
+            }, { status: 500 });
+        }
+
+        if (requestedPin !== adminPin) {
+            return NextResponse.json({ 
+                error: "AKSES DITOLAK: PIN Administrator salah atau sesi Anda telah berakhir. Silakan Logout dan Login kembali." 
+            }, { status: 401 });
         }
 
         if (!replicateToken) {

@@ -339,8 +339,57 @@ export default function Home() {
 
   if (!isClient) return null;
 
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center p-6 bg-zinc-950">
+        <div className="w-full max-w-md glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl relative overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-pink-500/10 opacity-50 pointer-events-none group-hover:opacity-75 transition-opacity" />
+          <div className="relative z-10">
+            <div className="flex justify-center mb-6">
+              <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                <ShieldCheck className="w-8 h-8 text-white" />
+              </div>
+            </div>
+            
+            <h1 className="text-2xl font-bold text-center text-white mb-2">Production Login</h1>
+            <p className="text-zinc-500 text-sm text-center mb-8">Access restricted to authorized production staff only.</p>
+            
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Admin Access PIN</label>
+                <input 
+                  type="password" 
+                  value={pinInput} 
+                  onChange={(e) => setPinInput(e.target.value)} 
+                  placeholder="••••••" 
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-center text-2xl tracking-[0.5em] text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-mono"
+                  autoFocus
+                />
+              </div>
+              
+              {authError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500 text-xs text-center animate-shake">
+                  {authError}
+                </div>
+              )}
+              
+              <button 
+                type="submit" 
+                disabled={isVerifying || !pinInput.trim()} 
+                className="w-full py-4 bg-indigo-500 hover:bg-indigo-400 disabled:bg-zinc-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+              >
+                {isVerifying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-4 h-4" />}
+                {isVerifying ? "Verifying..." : "Unlock Dashboard"}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="relative flex flex-col flex-1 items-center justify-center p-6 md:p-12 w-full max-w-6xl mx-auto">
+    <div className="flex flex-col flex-1 items-center justify-center p-6 md:p-12 w-full max-w-6xl mx-auto">
       
       <div className="absolute top-4 right-4 z-20"><button onClick={handleLogout} className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-full text-sm font-semibold flex items-center gap-2"><LogOut className="w-4 h-4" /> Logout</button></div>
 
