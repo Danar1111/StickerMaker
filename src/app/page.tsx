@@ -84,6 +84,69 @@ async function getCroppedImg(imageSrc: string, crop: Crop): Promise<string> {
     return canvas.toDataURL('image/png');
 }
 
+// v9.7: Ultimate Matte Fixed Engine (Gaussian Thresholding)
+async function refineAlpha(imageSrc: string, amount: number): Promise<string> {
+  const image = await createImage(imageSrc);
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx || amount <= 0) return imageSrc;
+
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  canvas.width = width;
+  canvas.height = height;
+
+  // 1. Create the Alpha Silhouette
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const mCtx = maskCanvas.getContext('2d');
+  if (!mCtx) return imageSrc;
+  
+  mCtx.drawImage(image, 0, 0);
+  mCtx.globalCompositeOperation = 'source-in';
+  mCtx.fillStyle = 'white';
+  mCtx.fillRect(0, 0, width, height);
+
+  // 2. Blur the Silhouette (Native GPU Engine)
+  const blurCanvas = document.createElement('canvas');
+  blurCanvas.width = width;
+  blurCanvas.height = height;
+  const bCtx = blurCanvas.getContext('2d');
+  if (!bCtx) return imageSrc;
+  
+  // The magic ratio: blur radius controls the softness of erosion
+  bCtx.filter = `blur(${amount * 0.8}px)`;
+  bCtx.drawImage(maskCanvas, 0, 0);
+
+  // 3. Sigmoid Thresholding Pass (Anti-Aliased Erosion)
+  const imageData = bCtx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  
+  // Higher threshold = more erosion. 
+  // We use a soft-sigmoid to preserve anti-aliasing.
+  const threshold = 160; 
+  const softness = 40; 
+  
+  for (let i = 3; i < data.length; i += 4) {
+    const alpha = data[i];
+    if (alpha === 0) continue;
+    
+    // Smoothstep/Sigmoid mapping
+    const v = (alpha - threshold) / softness;
+    data[i] = Math.max(0, Math.min(255, v * 255));
+  }
+  bCtx.putImageData(imageData, 0, 0);
+
+  // 4. Final Professional Composite
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(blurCanvas, 0, 0);
+
+  return canvas.toDataURL('image/png');
+}
+
 export default function Home() {
   // Auth State
   const [isAuthenticated, setIsAuthenticated] = useState(true);
@@ -123,8 +186,12 @@ export default function Home() {
   const [isStyleOpen, setIsStyleOpen] = useState(false);
   const styleDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Cropping State (v2 - react-image-crop)
+  // Studio State (Crop/Refine v8.1)
   const [croppingIdx, setCroppingIdx] = useState<number | null>(null);
+  const [refiningIdx, setRefiningIdx] = useState<{idx: number, tab: 'gen'|'manual'} | null>(null);
+  const [refineAmount, setRefineAmount] = useState(2);
+  const [isRefining, setIsRefining] = useState(false);
+  const [refinedPreviewUrl, setRefinedPreviewUrl] = useState<string | null>(null);
   const [crop, setCrop] = useState<Crop>();
   const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
   const [cropAspect, setCropAspect] = useState<number | undefined>(undefined);
@@ -166,6 +233,29 @@ export default function Home() {
       return () => window.removeEventListener("resize", checkMobile);
     }
   }, []);
+
+  // Real-time Refine Preview Engine (v9.0)
+  useEffect(() => {
+    if (!refiningIdx) {
+      setRefinedPreviewUrl(null);
+      return;
+    }
+    
+    setIsRefining(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const target = (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx];
+        const preview = await refineAlpha(target.upscaledUrl || target.url, refineAmount);
+        setRefinedPreviewUrl(preview);
+      } catch (err) {
+        console.error("Preview Refine Error:", err);
+      } finally {
+        setIsRefining(false);
+      }
+    }, 200); // 200ms debounce
+
+    return () => clearTimeout(timeout);
+  }, [refiningIdx, refineAmount, generatedImages, manualImages]);
 
   const [isVerifying, setIsVerifying] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -333,7 +423,7 @@ export default function Home() {
       // v7.12: Use percentage-based 'crop' for absolute accuracy
       const croppedImage = await getCroppedImg(
         manualImages[croppingIdx].upscaledUrl || manualImages[croppingIdx].url, 
-        crop
+        crop!
       );
       const newImages = [...manualImages];
       newImages[croppingIdx] = {
@@ -350,6 +440,48 @@ export default function Home() {
       alert("Gagal memotong gambar.");
     } finally {
       setIsCropping(false);
+    }
+  };
+
+  const handleSaveRefine = async () => {
+    if (!refiningIdx) return;
+    setIsRefining(true);
+    try {
+      // Use pre-calculated preview if available and consistent
+      const resultUrl = refinedPreviewUrl || await refineAlpha(
+        (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx].upscaledUrl || 
+        (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx].url, 
+        refineAmount
+      );
+      
+      if (refiningIdx.tab === 'gen') {
+        const newImages = [...generatedImages];
+        const target = newImages[refiningIdx.idx];
+        // v10.0: Commit as new base (Incremental)
+        newImages[refiningIdx.idx] = { 
+          ...target, 
+          url: resultUrl, 
+          upscaledUrl: undefined 
+        };
+        setGeneratedImages(newImages);
+      } else {
+        const newImages = [...manualImages];
+        newImages[refiningIdx.idx] = { 
+          ...newImages[refiningIdx.idx], 
+          id: Math.random().toString(36).substr(2, 9), // Force re-render
+          url: resultUrl, 
+          originalUrl: resultUrl, // v10.0: Commit as new base for all tools
+          upscaledUrl: undefined 
+        };
+        setManualImages(newImages);
+      }
+      setRefiningIdx(null);
+      setRefinedPreviewUrl(null);
+    } catch (e) {
+      console.error(e);
+      alert("Gagal mengkikis gambar.");
+    } finally {
+      setIsRefining(false);
     }
   };
 
@@ -682,6 +814,7 @@ export default function Home() {
                   img={img} 
                   onUpscale={() => handleUpscale(idx)} 
                   onPreview={() => setPreviewImage(img.upscaledUrl || img.url)} 
+                  onRefine={() => { setRefineAmount(1); setRefiningIdx({idx, tab: 'gen'}); }}
                   globalLock={globalUpscaleState !== "IDLE" || isGenerating} 
                   upscaleCooldownTime={upscaleCooldownTime}
                 />
@@ -698,6 +831,7 @@ export default function Home() {
                       setShowCropControls(true);
                     }}
                     onPreview={(url) => setPreviewImage(url)}
+                    onRefine={(idx) => { setRefineAmount(1); setRefiningIdx({idx, tab: 'manual'}); }}
                     onDelete={(id) => setManualImages(m => m.filter(x => x.id !== id))}
                     globalLock={globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating}
                     upscaleCooldownTime={upscaleCooldownTime}
@@ -721,134 +855,163 @@ export default function Home() {
         </div>
       )}
 
-      {/* CROP MODAL v4 - NON-OVERLAPPING STUDIO */}
-      {croppingIdx !== null && (
-        <div className="fixed inset-0 z-[60] bg-zinc-950 flex flex-col overflow-hidden animate-in fade-in duration-300">
-          {/* Header */}
-          <div className="p-4 flex justify-between items-center bg-zinc-900 border-b border-white/5 z-20 shrink-0">
-            <h3 className="font-bold flex items-center gap-2 text-sm text-zinc-300">
-              <Scissors className="w-4 h-4 text-pink-500" /> Editor Potong Studio
-            </h3>
-            <button onClick={() => setCroppingIdx(null)} className="p-1.5 hover:bg-white/10 rounded-full transition-colors"><X className="w-5 h-5 text-zinc-500" /></button>
-          </div>
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-            {/* Main Stage (Image Area - Priority) */}
-            <div className="flex-1 min-h-0 relative bg-black overflow-hidden transition-all duration-500">
-              <div className="absolute inset-0 flex items-center justify-center p-4 md:p-12">
-                <ReactCrop
-                  crop={crop}
-                  onChange={(c) => setCrop(c)}
-                  onComplete={(c) => setCompletedCrop(c)}
-                  aspect={cropAspect}
-                  className="shadow-2xl shadow-white/5 transition-all duration-300"
+      {/* Studio Modal (Crop & Refine v8.3) */}
+      {(croppingIdx !== null || refiningIdx !== null) && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-4 animate-in fade-in duration-300">
+          <div className="absolute inset-0 bg-black/95 backdrop-blur-3xl" />
+          
+          <div className="relative w-full h-full max-w-7xl bg-zinc-950 sm:rounded-[32px] overflow-hidden flex flex-col border border-white/10 shadow-2xl">
+            {/* Modal Header */}
+            <div className="p-4 md:p-6 border-b border-white/5 flex items-center justify-between bg-zinc-900/50">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white">
+                  {refiningIdx ? <Sparkles className="w-5 h-5" /> : <Scissors className="w-5 h-5" />}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white leading-tight">
+                    {refiningIdx ? "Edge Shaver Studio" : "Precision Cropping"}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                    <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black">Pro Studio v8.3</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => { setCroppingIdx(null); setRefiningIdx(null); }}
+                  className="p-2 hover:bg-white/5 text-zinc-500 hover:text-white rounded-full transition-all"
                 >
-                  <img
-                    ref={imgRef}
-                    alt="Cropme"
-                    src={manualImages[croppingIdx].url}
-                    onLoad={(e) => {
-                      const { width, height } = e.currentTarget;
-                      // v7.8: Targeted Responsive Scaling - Absolute 100% Bounds
-                      const initialCrop: Crop = { unit: '%', width: 100, height: 100, x: 0, y: 0 };
-                      setCrop(initialCrop);
-                    }}
-                    style={{ 
-                      maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(100vh - 180px)',
-                      maxWidth: isMobile ? '100%' : 'calc(100vw - 420px)'
-                    }}
-                    className="object-contain block select-none pointer-events-none rounded shadow-2xl"
-                  />
-                </ReactCrop>
+                  <X className="w-6 h-6" />
+                </button>
               </div>
             </div>
 
-            {/* Mobile Floating Toggle Bubble */}
-            <button 
-              onClick={() => setShowCropControls(!showCropControls)}
-              className="md:hidden fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-600/40 z-50 active:scale-95 transition-all"
-            >
-              {showCropControls ? <X className="w-6 h-6" /> : <Settings2 className="w-6 h-6" />}
-            </button>
-
-            {/* Controls (Adapts to Mobile Floating / Desktop Sidebar) */}
-            <div className={clsx(
-              "shrink-0 z-40 transition-all duration-500",
-              // Mobile: Floating Glass Panel
-              "fixed bottom-24 left-6 right-6 md:relative md:bottom-0 md:left-0 md:right-0",
-              "md:w-80 bg-zinc-900 md:bg-zinc-900 border md:border-t-0 md:border-l border-white/5 flex flex-col p-4 md:p-6 overflow-y-auto max-h-[60vh] md:max-h-full shadow-2xl rounded-3xl md:rounded-none",
-              // Mobile Visibility Toggle
-              !showCropControls ? "opacity-0 translate-y-10 pointer-events-none sm:opacity-100 sm:translate-y-0 sm:pointer-events-auto" : "opacity-100 translate-y-0 pointer-events-auto",
-              // Glass Effect for Mobile
-              "bg-zinc-900/90 backdrop-blur-2xl md:bg-zinc-900"
-            )}>
-              <div className="space-y-6 flex-1 flex flex-col">
-                {/* Aspect Ratios Section */}
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black ml-1">Aspect Ratio Matrix</span>
-                    <p className="text-[10px] text-zinc-600 ml-1">Ketuk untuk ubah rasio</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { label: "Bebas", val: undefined },
-                      { label: "1:1 Square", val: 1 },
-                      { label: "4:5 Portrait", val: 0.8 },
-                      { label: "9:16 Story", val: 0.5625 },
-                      { label: "16:9 Wide", val: 1.777 },
-                    ].map((ratio) => (
-                      <button
-                        key={ratio.label}
-                        onClick={() => {
-                            setCropAspect(ratio.val);
-                            if (imgRef.current) {
-                               const { width: dW, height: dH } = imgRef.current;
-                               const imgA = dW / dH;
-                               let nC: Crop;
-                               
-                               if (ratio.val) {
-                                 // v7.14: Absolute Maximizer - Auto-fills the image centered
-                                 nC = centerCrop(
-                                   makeAspectCrop(
-                                     { unit: '%', [imgA > ratio.val ? 'height' : 'width']: 100 }, 
-                                     ratio.val, 
-                                     dW, 
-                                     dH
-                                   ),
-                                   dW,
-                                   dH
-                                 );
-                               } else {
-                                 // v7.14: Freeform (Bebas) snaps to 100% full
-                                 nC = { unit: '%', x: 0, y: 0, width: 100, height: 100 };
-                               }
-                               setCrop(nC);
-                            }
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+              {/* Main Stage */}
+              <div className="flex-1 min-h-0 relative bg-black overflow-hidden transition-all duration-500">
+                <div className="absolute inset-0 flex items-center justify-center p-4 md:p-12">
+                  {refiningIdx ? (
+                    <div className="relative group">
+                       <img
+                        alt="Refine Target"
+                        src={refinedPreviewUrl || (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx].url}
+                        className="object-contain block select-none pointer-events-none rounded shadow-2xl transition-all duration-300"
+                        style={{ 
+                          maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(100vh - 180px)',
+                          maxWidth: isMobile ? '100%' : 'calc(100vw - 420px)'
                         }}
-                        className={clsx(
-                          "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center border transition-all active:scale-95",
-                          cropAspect === ratio.val
-                            ? "bg-white text-zinc-950 border-white shadow-lg"
-                            : "bg-zinc-800 text-zinc-400 border-white/5 hover:border-white/10"
-                        )}
-                      >
-                        <span className="text-[10px] font-black">{ratio.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                      />
+                      {isRefining && (
+                        <div className="absolute inset-0 bg-black/20 flex items-center justify-center backdrop-blur-[1px] rounded transition-opacity">
+                           <div className="flex flex-col items-center gap-2">
+                             <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
+                             <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Kikisan Otomatis...</span>
+                           </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <ReactCrop
+                      crop={crop!}
+                      onChange={(c) => setCrop(c)}
+                      onComplete={(c) => setCompletedCrop(c)}
+                      aspect={cropAspect}
+                      className="shadow-2xl shadow-white/5 transition-all duration-300"
+                    >
+                      <img
+                        ref={imgRef}
+                        alt="Cropme"
+                        src={manualImages[croppingIdx!].url}
+                        onLoad={onImageLoad}
+                        style={{ 
+                          maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(100vh - 180px)',
+                          maxWidth: isMobile ? '100%' : 'calc(100vw - 420px)'
+                        }}
+                        className="object-contain block select-none pointer-events-none rounded shadow-2xl"
+                      />
+                    </ReactCrop>
+                  )}
+                </div>
+              </div>
+
+              {/* Sidebar controls */}
+              <div className={clsx(
+                "absolute bottom-0 left-0 right-0 md:relative md:w-[380px] border-t md:border-t-0 md:border-l border-white/5 p-6 flex flex-col transition-all duration-500 z-50",
+                "bg-zinc-900/90 backdrop-blur-2xl md:bg-zinc-900",
+                !showCropControls && !refiningIdx ? "opacity-0 translate-y-10" : "opacity-100 translate-y-0"
+              )}>
+                <div className="space-y-6 flex-1 flex flex-col">
+                  {refiningIdx ? (
+                    <div className="space-y-6">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black ml-1">Refinement Strength</span>
+                        <p className="text-[10px] text-zinc-600 ml-1">Kikis sisa background di pinggiran</p>
+                      </div>
+                      <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/5">
+                        <div className="flex justify-between items-center px-1">
+                          <span className="text-xs font-bold text-zinc-400">Kedalaman Kikis</span>
+                          <span className="text-xl font-black text-indigo-400">{refineAmount}px</span>
+                        </div>
+                        <input type="range" min="1" max="10" value={refineAmount} onChange={(e) => setRefineAmount(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black ml-1">Aspect Ratio Matrix</span>
+                        <p className="text-[10px] text-zinc-600 ml-1">Ketuk untuk ubah rasio</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { label: "Bebas", val: undefined },
+                          { label: "1:1 Square", val: 1 },
+                          { label: "4:5 Portrait", val: 0.8 },
+                          { label: "9:16 Story", val: 0.5625 },
+                          { label: "16:9 Wide", val: 1.777 },
+                        ].map((ratio) => (
+                          <button
+                            key={ratio.label}
+                            onClick={() => {
+                                setCropAspect(ratio.val);
+                                if (imgRef.current) {
+                                   const { width: dW, height: dH } = imgRef.current;
+                                   const imgA = dW / dH;
+                                   let nC: Crop;
+                                   if (ratio.val) {
+                                     nC = centerCrop(makeAspectCrop({ unit: '%', [imgA > ratio.val ? 'height' : 'width']: 100 }, ratio.val, dW, dH), dW, dH);
+                                   } else {
+                                     nC = { unit: '%', x: 0, y: 0, width: 100, height: 100 };
+                                   }
+                                   setCrop(nC);
+                                }
+                            }}
+                            className={clsx(
+                              "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center border transition-all active:scale-95",
+                              cropAspect === ratio.val ? "bg-white text-zinc-950 border-white shadow-lg" : "bg-zinc-800 text-zinc-400 border-white/5"
+                            )}
+                          >
+                            <span className="text-[10px] font-black">{ratio.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="space-y-3 mt-auto pt-4">
+                <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
                   <button
-                    onClick={handleSaveCrop}
-                    disabled={isCropping || !completedCrop}
-                    className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-indigo-400 shadow-xl shadow-indigo-500/20 active:scale-95 transition-all text-sm uppercase tracking-widest"
+                    onClick={refiningIdx ? handleSaveRefine : handleSaveCrop}
+                    disabled={isCropping || isRefining || (!completedCrop && !refiningIdx)}
+                    className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-indigo-400 shadow-xl shadow-indigo-500/20 active:scale-95 transition-all text-sm uppercase"
                   >
-                    {isCropping ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
-                    {isCropping ? "Sedang Proses..." : "SIMPAN HASIL"}
+                    {(isCropping || isRefining) ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
+                    {(isCropping || isRefining) ? "Sedang Proses..." : refiningIdx ? "TERAPKAN KIKISAN" : "SIMPAN POTONGAN"}
                   </button>
                   <button
-                    onClick={() => setCroppingIdx(null)}
-                    className="w-full py-3 bg-zinc-800 text-zinc-500 rounded-2xl font-bold border border-white/5 hover:bg-zinc-700 hover:text-white transition-all text-xs uppercase"
+                    onClick={() => { setCroppingIdx(null); setRefiningIdx(null); }}
+                    className="w-full py-3 bg-zinc-800 text-zinc-500 rounded-2xl font-bold border border-white/5 hover:bg-zinc-700 hover:text-white transition-all text-xs"
                   >
                     Batal
                   </button>
@@ -862,7 +1025,14 @@ export default function Home() {
   );
 }
 
-function StickerCard({ img, onUpscale, onPreview, globalLock, upscaleCooldownTime }: any) {
+function StickerCard({ img, onUpscale, onPreview, onRefine, globalLock, upscaleCooldownTime }: {
+  img: any,
+  onUpscale: () => void,
+  onPreview: () => void,
+  onRefine: () => void,
+  globalLock: boolean,
+  upscaleCooldownTime: number
+}) {
   const [showMenu, setShowMenu] = useState(false);
   
   return (
@@ -926,8 +1096,16 @@ function StickerCard({ img, onUpscale, onPreview, globalLock, upscaleCooldownTim
         </div>
 
         <div className="flex w-full gap-2 border-t border-white/10 pt-3 mt-1">
-          <button onClick={(e) => { e.stopPropagation(); onPreview(); }} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex justify-center transition-colors" title="View"><Maximize className="w-4 h-4" /></button>
-          <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, "sticker.png"); }} className="flex-1 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex justify-center transition-colors" title="Save"><Download className="w-4 h-4" /></button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onRefine(); }} 
+            className="flex-1 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-lg flex flex-col items-center justify-center transition-colors" 
+            title="Refine Edge"
+          >
+            <Sparkles className="w-3 h-3" />
+            <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5">Kikis</span>
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onPreview(); }} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex justify-center transition-colors" title="View"><Maximize className="w-3.5 h-3.5" /></button>
+          <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, "sticker.png"); }} className="flex-1 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex justify-center transition-colors" title="Save"><Download className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
@@ -941,12 +1119,13 @@ function StickerCard({ img, onUpscale, onPreview, globalLock, upscaleCooldownTim
   );
 }
 
-function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onDelete, globalLock, upscaleCooldownTime, isManualBatchProcessing, isGenerating }: { 
+function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine, onDelete, globalLock, upscaleCooldownTime, isManualBatchProcessing, isGenerating }: { 
   img: any, 
   idx: number, 
   onManualAction: (idx: number, type: "remove_bg" | "upscale") => void, 
   onCropOpen: (idx: number) => void, 
   onPreview: (url: string) => void, 
+  onRefine: (idx: number) => void,
   onDelete: (id: string) => void, 
   globalLock: boolean, 
   upscaleCooldownTime: number, 
@@ -997,7 +1176,7 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onDelete,
             </button>
           )}
 
-          <div className="grid grid-cols-3 gap-2 w-full">
+          <div className="grid grid-cols-4 gap-2 w-full">
              <button 
                onClick={(e) => { e.stopPropagation(); onManualAction(idx, "remove_bg"); }} 
                disabled={img.isProcessing || img.url !== img.originalUrl || globalLock} 
@@ -1008,17 +1187,26 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onDelete,
                 <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">BG</span>
              </button>
              <button 
+               onClick={(e) => { e.stopPropagation(); onRefine(idx); }} 
+               disabled={img.isProcessing || img.isUpscaling} 
+               className="py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 disabled:opacity-40 transition-colors"
+               title="Refine Edge"
+             >
+                <Sparkles className="w-4 h-4 text-emerald-400" />
+                <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">Kikis</span>
+             </button>
+             <button 
                onClick={(e) => { e.stopPropagation(); onManualAction(idx, "upscale"); }} 
                disabled={img.isUpscaling || !!img.upscaledUrl || globalLock} 
                className="py-2.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg flex flex-col items-center justify-center gap-1 shadow-lg shadow-indigo-500/20 disabled:opacity-40 transition-colors"
                title="Upscale 4K"
              >
                 <Sparkles className="w-4 h-4" />
-                <span className="text-[8px] font-bold hidden sm:inline">4K</span>
+                <span className="text-[8px] font-bold hidden sm:inline text-white">4K</span>
              </button>
              <button 
                onClick={(e) => { e.stopPropagation(); onCropOpen(idx); }} 
-               disabled={img.isProcessing || img.isUpscaling || globalLock || isManualBatchProcessing || isGenerating} 
+               disabled={img.isProcessing || img.isUpscaling}
                className="py-2.5 bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg flex flex-col items-center justify-center gap-1 border border-pink-500/30 disabled:opacity-40 transition-colors"
                title="Crop"
              >
