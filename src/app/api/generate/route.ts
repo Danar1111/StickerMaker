@@ -2,13 +2,46 @@ import { NextResponse } from "next/server";
 
 export const maxDuration = 60; // Max duration for Vercel
 
+// Upload base64 data URL ke Replicate Files API, return hosted URL
+async function uploadToReplicate(dataUrl: string, token: string): Promise<string> {
+    // Jika sudah berupa URL biasa (bukan base64), langsung kembalikan
+    if (!dataUrl.startsWith("data:")) return dataUrl;
+
+    const base64Data = dataUrl.split(",")[1];
+    const mimeMatch = dataUrl.match(/data:([^;]+);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/png";
+    const ext = mimeType.includes("png") ? "png" : "jpg";
+
+    const buffer = Buffer.from(base64Data, "base64");
+    const blob = new Blob([buffer], { type: mimeType });
+
+    const formData = new FormData();
+    formData.append("content", blob, `upload.${ext}`);
+
+    console.log(`[Upload] Uploading ${Math.round(buffer.length / 1024)} KB to Replicate Files API...`);
+
+    const res = await fetch("https://api.replicate.com/v1/files", {
+        method: "POST",
+        headers: { "Authorization": `Token ${token}` },
+        body: formData,
+    });
+
+    if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`File upload gagal (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    console.log(`[Upload] Sukses! URL: ${data.urls.get}`);
+    return data.urls.get;
+}
+
 async function runReplicateModel(owner: string, name: string, input: any, token: string) {
     const initRes = await fetch(`https://api.replicate.com/v1/models/${owner}/${name}/predictions`, {
         method: "POST",
         headers: {
             "Authorization": `Token ${token}`,
             "Content-Type": "application/json",
-            // Menghapus 'Prefer: wait' untuk mencegah ETIMEDOUT di VPS
         },
         body: JSON.stringify({ input })
     });
@@ -22,7 +55,7 @@ async function runReplicateModel(owner: string, name: string, input: any, token:
         const pollData = await pollRes.json();
         if (pollData.status === "succeeded") return pollData.output;
         if (pollData.status === "failed") throw new Error(pollData.error || "Replicate prediction failed");
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1500));
     }
 }
 
@@ -32,7 +65,6 @@ async function runReplicate(version: string, input: any, token: string) {
         headers: {
             "Authorization": `Token ${token}`,
             "Content-Type": "application/json",
-            // Menghapus 'Prefer: wait' untuk mencegah ETIMEDOUT di VPS
         },
         body: JSON.stringify({ version, input })
     });
@@ -46,7 +78,7 @@ async function runReplicate(version: string, input: any, token: string) {
         const pollData = await pollRes.json();
         if (pollData.status === "succeeded") return pollData.output;
         if (pollData.status === "failed") throw new Error(pollData.error || "Replicate prediction failed");
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1500));
     }
 }
 
@@ -136,21 +168,27 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             const payloadSize = imageUrl ? Math.round(imageUrl.length / 1024) : 0;
             console.log(`[API] Action: remove_bg, Payload Size: ${payloadSize} KB`);
             
+            // Upload gambar ke Replicate Files API dulu, lalu kirim URL-nya saja
+            const hostedUrl = await uploadToReplicate(imageUrl, replicateToken);
+            console.log(`[API] Hosted URL: ${hostedUrl}`);
+            
             const rembgModelVersion = "fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003";
             const transparentImageUrl = await runReplicate(
                 rembgModelVersion,
-                { image: imageUrl },
+                { image: hostedUrl },
                 replicateToken
             );
             return NextResponse.json({ imageUrl: transparentImageUrl });
         }
 
         else if (action === "upscale") {
-            // Menggunakan AI Upscaler Real-ESRGAN (nightmareai) untuk menajamkan resolusi gambar 4x Lipat (4K)
+            // Upload gambar ke Replicate Files API dulu jika masih base64
+            const hostedUrl = await uploadToReplicate(imageUrl, replicateToken);
+            
             const esrganModelVersion = "42fed1c4974146d4d2414e2be2c5277c7fcf05fcc3a73abf41610695738c1d7b";
             const upscaledImageUrl = await runReplicate(
                 esrganModelVersion,
-                { image: imageUrl, scale: 4, face_enhance: false },
+                { image: hostedUrl, scale: 4, face_enhance: false },
                 replicateToken
             );
             return NextResponse.json({ imageUrl: upscaledImageUrl });
