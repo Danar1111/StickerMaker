@@ -1,7 +1,31 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Wand2, Image as ImageIcon, Sparkles, Download, Loader2, X, Lock, Maximize, ShieldCheck, LogOut, Upload, Zap, Trash2, Layers, ChevronDown } from "lucide-react";
+import { 
+  Wand2, 
+  Image as ImageIcon, 
+  Sparkles, 
+  Download, 
+  Loader2, 
+  Trash2, 
+  Maximize, 
+  Scissors, 
+  ExternalLink, 
+  X, 
+  ShieldCheck,
+  Monitor,
+  MoreVertical,
+  Settings,
+  Settings2,
+  Zap,
+  Upload,
+  LogOut,
+  ChevronDown,
+  Layout,
+  Lock
+} from "lucide-react";
+import ReactCrop, { Crop, PixelCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 import clsx from "clsx";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -18,6 +42,47 @@ const STYLES = [
   "Pop Art Comic", "Minimalist Line Art", "Low Poly", "Origami Papercraft",
   "Claymation / Plasticine", "Graffiti Street Art"
 ];
+
+// Helper to create image from URL
+const createImage = (url: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener('load', () => resolve(image));
+    image.addEventListener('error', (error) => reject(error));
+    image.setAttribute('crossOrigin', 'anonymous');
+    image.src = url;
+  });
+
+// Helper to get cropped image as data URL
+async function getCroppedImg(imageSrc: string, crop: Crop): Promise<string> {
+    const image = await createImage(imageSrc);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return "";
+
+    // v7.12: Percentage Precision Engine - No more rendered-pixel scaling
+    // Percentages (0-100) are mapped directly to natural dimensions
+    const scaleX = image.naturalWidth / 100;
+    const scaleY = image.naturalHeight / 100;
+
+    canvas.width = crop.width! * scaleX;
+    canvas.height = crop.height! * scaleY;
+
+    ctx.drawImage(
+      image,
+      crop.x! * scaleX,
+      crop.y! * scaleY,
+      crop.width! * scaleX,
+      crop.height! * scaleY,
+      0,
+      0,
+      crop.width! * scaleX,
+      crop.height! * scaleY
+    );
+
+    return canvas.toDataURL('image/png');
+}
 
 export default function Home() {
   // Auth State
@@ -58,6 +123,15 @@ export default function Home() {
   const [isStyleOpen, setIsStyleOpen] = useState(false);
   const styleDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Cropping State (v2 - react-image-crop)
+  const [croppingIdx, setCroppingIdx] = useState<number | null>(null);
+  const [crop, setCrop] = useState<Crop>();
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+  const [cropAspect, setCropAspect] = useState<number | undefined>(undefined);
+  const [isCropping, setIsCropping] = useState(false);
+  const [showCropControls, setShowCropControls] = useState(true);
+  const imgRef = useRef<HTMLImageElement>(null);
+
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -80,6 +154,17 @@ export default function Home() {
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  // Responsive Hook for CropModal
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const checkMobile = () => setIsMobile(window.innerWidth < 768);
+      checkMobile();
+      window.addEventListener("resize", checkMobile);
+      return () => window.removeEventListener("resize", checkMobile);
+    }
   }, []);
 
   const [isVerifying, setIsVerifying] = useState(false);
@@ -235,7 +320,72 @@ export default function Home() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files) Array.from(files).forEach(processFile);
+    if (files) {
+      Array.from(files).forEach(processFile);
+      e.target.value = ""; // Reset value to allow identical re-uploads
+    }
+  };
+
+  const handleSaveCrop = async () => {
+    if (croppingIdx === null || !completedCrop) return;
+    setIsCropping(true);
+    try {
+      // v7.12: Use percentage-based 'crop' for absolute accuracy
+      const croppedImage = await getCroppedImg(
+        manualImages[croppingIdx].upscaledUrl || manualImages[croppingIdx].url, 
+        crop
+      );
+      const newImages = [...manualImages];
+      newImages[croppingIdx] = {
+        ...newImages[croppingIdx],
+        id: Math.random().toString(36).substr(2, 9), // v7.11: Refresh ID to force Gallery re-render
+        url: croppedImage,
+        originalUrl: croppedImage,
+        upscaledUrl: undefined // New crop source, reset 4K
+      };
+      setManualImages(newImages);
+      setCroppingIdx(null);
+    } catch (e) {
+      console.error(e);
+      alert("Gagal memotong gambar.");
+    } finally {
+      setIsCropping(false);
+    }
+  };
+
+  const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { width, height, naturalWidth, naturalHeight } = e.currentTarget;
+    const imageAspect = width / height;
+    
+    // Always provide an initial crop (Maximized)
+    let initialCrop: Crop;
+    if (cropAspect) {
+      const isImageWiderThanAspect = imageAspect > cropAspect;
+      initialCrop = centerCrop(
+        makeAspectCrop(
+          { unit: '%', [isImageWiderThanAspect ? 'height' : 'width']: 100 }, 
+          cropAspect, 
+          width, 
+          height
+        ),
+        width,
+        height
+      );
+    } else {
+      initialCrop = { unit: '%' as const, x: 0, y: 0, width: 100, height: 100 };
+    }
+    
+    setCrop(initialCrop);
+
+    // Also calculate initial PixelCrop so Simpan button is active immediately
+    const pixelCrop: PixelCrop = {
+      unit: 'px',
+      x: (initialCrop.x * naturalWidth) / 100,
+      y: (initialCrop.y * naturalHeight) / 100,
+      width: (initialCrop.width * naturalWidth) / 100,
+      height: (initialCrop.height * naturalHeight) / 100,
+    };
+    setCompletedCrop(pixelCrop);
   };
 
   const handleManualAction = async (idx: number, type: "remove_bg" | "upscale") => {
@@ -536,52 +686,24 @@ export default function Home() {
                   upscaleCooldownTime={upscaleCooldownTime}
                 />
               )) : manualImages.map((img, idx) => (
-                <div key={img.id} className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group overflow-hidden animate-in fade-in duration-300">
-                   {/* Status Badges */}
-                   <div className="absolute top-2 left-2 flex gap-1 z-20">
-                      {img.url !== img.originalUrl && <div className="bg-indigo-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">B-FREE</div>}
-                      {img.upscaledUrl && <div className="bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">4K</div>}
-                   </div>
-                   
-                   {/* Centered Processing Loader */}
-                   {(img.isProcessing || img.isUpscaling) && (
-                      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-30 flex items-center justify-center">
-                         <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
-                      </div>
-                   )}
-
-                   {/* Hover Overlay - Premium Design */}
-                   <div className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300 z-10 flex flex-col items-center justify-center p-4 gap-3">
-                      <div className="flex flex-col w-full gap-2">
-                         <button 
-                           onClick={() => handleManualAction(idx, "remove_bg")} 
-                           disabled={img.isProcessing || img.url !== img.originalUrl || globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating} 
-                           className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 border border-white/10 disabled:opacity-40 transition-colors"
-                         >
-                            <ShieldCheck className="w-3.5 h-3.5" /> {globalUpscaleState === "COOLDOWN" ? `Jeda (${upscaleCooldownTime}s)` : "Hapus BG"}
-                         </button>
-                         <button 
-                           onClick={() => handleManualAction(idx, "upscale")} 
-                           disabled={img.isUpscaling || !!img.upscaledUrl || globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating} 
-                           className="w-full py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-40 transition-colors"
-                         >
-                            <Sparkles className="w-3.5 h-3.5" /> {globalUpscaleState === "COOLDOWN" ? `Jeda (${upscaleCooldownTime}s)` : "Upscale 4K"}
-                         </button>
-                      </div>
-                      
-                      <div className="flex w-full gap-2 border-t border-white/10 pt-3 mt-1">
-                        <button onClick={() => setPreviewImage(img.upscaledUrl || img.url)} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex justify-center transition-colors" title="Preview"><Maximize className="w-4 h-4" /></button>
-                        <button onClick={() => saveAs(img.upscaledUrl || img.url, `Sticker_${idx}.png`)} className="flex-1 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex justify-center transition-colors shadow-inner" title="Download"><Download className="w-4 h-4" /></button>
-                        <button onClick={() => setManualImages(m => m.filter(x => x.id !== img.id))} className="flex-1 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg flex justify-center transition-colors border border-red-500/20" title="Hapus"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                   </div>
-
-                   {/* Main Image */}
-                   <img 
-                     src={img.upscaledUrl || img.url} 
-                     alt="Manual" 
-                     className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" 
-                   />
+                <div key={img.id} className="group relative">
+                  <ManualCard 
+                    img={img} 
+                    idx={idx}
+                    onManualAction={handleManualAction}
+                    onCropOpen={(idx) => {
+                      setCroppingIdx(idx); 
+                      setCrop(undefined); 
+                      setCropAspect(undefined);
+                      setShowCropControls(true);
+                    }}
+                    onPreview={(url) => setPreviewImage(url)}
+                    onDelete={(id) => setManualImages(m => m.filter(x => x.id !== id))}
+                    globalLock={globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating}
+                    upscaleCooldownTime={upscaleCooldownTime}
+                    isManualBatchProcessing={isManualBatchProcessing}
+                    isGenerating={isGenerating}
+                  />
                 </div>
               ))}
             </div>
@@ -598,16 +720,167 @@ export default function Home() {
           <img src={previewImage} alt="Preview" className="max-w-full max-h-full object-contain" />
         </div>
       )}
+
+      {/* CROP MODAL v4 - NON-OVERLAPPING STUDIO */}
+      {croppingIdx !== null && (
+        <div className="fixed inset-0 z-[60] bg-zinc-950 flex flex-col overflow-hidden animate-in fade-in duration-300">
+          {/* Header */}
+          <div className="p-4 flex justify-between items-center bg-zinc-900 border-b border-white/5 z-20 shrink-0">
+            <h3 className="font-bold flex items-center gap-2 text-sm text-zinc-300">
+              <Scissors className="w-4 h-4 text-pink-500" /> Editor Potong Studio
+            </h3>
+            <button onClick={() => setCroppingIdx(null)} className="p-1.5 hover:bg-white/10 rounded-full transition-colors"><X className="w-5 h-5 text-zinc-500" /></button>
+          </div>
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+            {/* Main Stage (Image Area - Priority) */}
+            <div className="flex-1 min-h-0 relative bg-black overflow-hidden transition-all duration-500">
+              <div className="absolute inset-0 flex items-center justify-center p-4 md:p-12">
+                <ReactCrop
+                  crop={crop}
+                  onChange={(c) => setCrop(c)}
+                  onComplete={(c) => setCompletedCrop(c)}
+                  aspect={cropAspect}
+                  className="shadow-2xl shadow-white/5 transition-all duration-300"
+                >
+                  <img
+                    ref={imgRef}
+                    alt="Cropme"
+                    src={manualImages[croppingIdx].url}
+                    onLoad={(e) => {
+                      const { width, height } = e.currentTarget;
+                      // v7.8: Targeted Responsive Scaling - Absolute 100% Bounds
+                      const initialCrop: Crop = { unit: '%', width: 100, height: 100, x: 0, y: 0 };
+                      setCrop(initialCrop);
+                    }}
+                    style={{ 
+                      maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(100vh - 180px)',
+                      maxWidth: isMobile ? '100%' : 'calc(100vw - 420px)'
+                    }}
+                    className="object-contain block select-none pointer-events-none rounded shadow-2xl"
+                  />
+                </ReactCrop>
+              </div>
+            </div>
+
+            {/* Mobile Floating Toggle Bubble */}
+            <button 
+              onClick={() => setShowCropControls(!showCropControls)}
+              className="md:hidden fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-600/40 z-50 active:scale-95 transition-all"
+            >
+              {showCropControls ? <X className="w-6 h-6" /> : <Settings2 className="w-6 h-6" />}
+            </button>
+
+            {/* Controls (Adapts to Mobile Floating / Desktop Sidebar) */}
+            <div className={clsx(
+              "shrink-0 z-40 transition-all duration-500",
+              // Mobile: Floating Glass Panel
+              "fixed bottom-24 left-6 right-6 md:relative md:bottom-0 md:left-0 md:right-0",
+              "md:w-80 bg-zinc-900 md:bg-zinc-900 border md:border-t-0 md:border-l border-white/5 flex flex-col p-4 md:p-6 overflow-y-auto max-h-[60vh] md:max-h-full shadow-2xl rounded-3xl md:rounded-none",
+              // Mobile Visibility Toggle
+              !showCropControls ? "opacity-0 translate-y-10 pointer-events-none sm:opacity-100 sm:translate-y-0 sm:pointer-events-auto" : "opacity-100 translate-y-0 pointer-events-auto",
+              // Glass Effect for Mobile
+              "bg-zinc-900/90 backdrop-blur-2xl md:bg-zinc-900"
+            )}>
+              <div className="space-y-6 flex-1 flex flex-col">
+                {/* Aspect Ratios Section */}
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black ml-1">Aspect Ratio Matrix</span>
+                    <p className="text-[10px] text-zinc-600 ml-1">Ketuk untuk ubah rasio</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: "Bebas", val: undefined },
+                      { label: "1:1 Square", val: 1 },
+                      { label: "4:5 Portrait", val: 0.8 },
+                      { label: "9:16 Story", val: 0.5625 },
+                      { label: "16:9 Wide", val: 1.777 },
+                    ].map((ratio) => (
+                      <button
+                        key={ratio.label}
+                        onClick={() => {
+                            setCropAspect(ratio.val);
+                            if (imgRef.current) {
+                               const { width: dW, height: dH } = imgRef.current;
+                               const imgA = dW / dH;
+                               let nC: Crop;
+                               
+                               if (ratio.val) {
+                                 // v7.14: Absolute Maximizer - Auto-fills the image centered
+                                 nC = centerCrop(
+                                   makeAspectCrop(
+                                     { unit: '%', [imgA > ratio.val ? 'height' : 'width']: 100 }, 
+                                     ratio.val, 
+                                     dW, 
+                                     dH
+                                   ),
+                                   dW,
+                                   dH
+                                 );
+                               } else {
+                                 // v7.14: Freeform (Bebas) snaps to 100% full
+                                 nC = { unit: '%', x: 0, y: 0, width: 100, height: 100 };
+                               }
+                               setCrop(nC);
+                            }
+                        }}
+                        className={clsx(
+                          "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center border transition-all active:scale-95",
+                          cropAspect === ratio.val
+                            ? "bg-white text-zinc-950 border-white shadow-lg"
+                            : "bg-zinc-800 text-zinc-400 border-white/5 hover:border-white/10"
+                        )}
+                      >
+                        <span className="text-[10px] font-black">{ratio.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3 mt-auto pt-4">
+                  <button
+                    onClick={handleSaveCrop}
+                    disabled={isCropping || !completedCrop}
+                    className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-indigo-400 shadow-xl shadow-indigo-500/20 active:scale-95 transition-all text-sm uppercase tracking-widest"
+                  >
+                    {isCropping ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
+                    {isCropping ? "Sedang Proses..." : "SIMPAN HASIL"}
+                  </button>
+                  <button
+                    onClick={() => setCroppingIdx(null)}
+                    className="w-full py-3 bg-zinc-800 text-zinc-500 rounded-2xl font-bold border border-white/5 hover:bg-zinc-700 hover:text-white transition-all text-xs uppercase"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function StickerCard({ img, onUpscale, onPreview, globalLock, upscaleCooldownTime }: any) {
+  const [showMenu, setShowMenu] = useState(false);
+  
   return (
-    <div className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group overflow-hidden cursor-zoom-in animate-in zoom-in-50 duration-500">
-      {/* 4K Badge */}
-      {img.upscaledUrl && (
-        <div className="absolute top-2 right-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg z-20">
+    <div 
+      className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group overflow-hidden animate-in zoom-in-50 duration-500 cursor-pointer"
+      onClick={() => setShowMenu(!showMenu)}
+    >
+      {/* Visual Hint for Mobile */}
+      <div className={clsx(
+        "absolute top-3 right-3 text-white/40 sm:hidden transition-opacity z-20",
+        showMenu ? "opacity-0" : "opacity-100"
+      )}>
+        <MoreVertical className="w-5 h-5 drop-shadow-lg" />
+      </div>
+
+      {/* 4K Badge - Hide when menu is active for clarity */}
+      {img.upscaledUrl && !showMenu && (
+        <div className="absolute top-2 left-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg z-20">
           4K HD
         </div>
       )}
@@ -620,24 +893,34 @@ function StickerCard({ img, onUpscale, onPreview, globalLock, upscaleCooldownTim
         </div>
       )}
 
-      {/* Hover Overlay */}
+      {/* Hover/Tap Overlay */}
       <div className={clsx(
-        "absolute inset-0 bg-zinc-950/80 backdrop-blur-sm transition-opacity duration-300 z-10 flex flex-col items-center justify-center p-4 gap-3",
-        img.isUpscaling ? "hidden" : "opacity-0 group-hover:opacity-100"
+        "absolute inset-0 bg-zinc-950/90 backdrop-blur-md transition-all duration-300 z-10 flex flex-col items-center justify-center pt-10 pb-4 px-4 gap-2",
+        img.isUpscaling ? "hidden" : showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
       )}>
+        {/* Dedicated Close Button for Mobile Overlay - Styled better */}
+        {showMenu && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
+            className="absolute top-2 right-2 p-1 bg-white/20 hover:bg-white/30 backdrop-blur-xl rounded-full text-white sm:hidden z-30 border border-white/10"
+          >
+            <X className="w-2.5 h-2.5" />
+          </button>
+        )}
+
         <div className="w-full">
           {!img.upscaledUrl ? (
             <button 
               onClick={(e) => { e.stopPropagation(); onUpscale(); }} 
               disabled={globalLock || img.isUpscaling} 
-              className="w-full py-2.5 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white text-xs font-bold rounded-lg border border-white/10 disabled:opacity-40 transition-all active:scale-95"
+              className="w-full py-3 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg border border-white/10 disabled:opacity-40 transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
             >
-              <Sparkles className="w-3.5 h-3.5 mx-auto mb-1" />
-              {globalLock ? `Jeda API (${upscaleCooldownTime}s)` : "Upscale ke 4K"}
+              <Sparkles className="w-4 h-4" />
+              <span className="text-[10px] font-bold">{globalLock ? `${upscaleCooldownTime}s` : <><span className="sm:hidden">Upscale</span><span className="hidden sm:inline">Upscale ke 4K</span></>}</span>
             </button>
           ) : (
-            <div className="w-full py-2.5 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 flex items-center justify-center gap-2">
-              <ShieldCheck className="w-4 h-4" /> 4K Ready
+            <div className="w-full py-3 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 flex flex-col items-center justify-center gap-1">
+              <ShieldCheck className="w-5 h-5" /> <span className="text-[10px]">4K Ready</span>
             </div>
           )}
         </div>
@@ -654,6 +937,109 @@ function StickerCard({ img, onUpscale, onPreview, globalLock, upscaleCooldownTim
         alt="Sticker" 
         className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110" 
       />
+    </div>
+  );
+}
+
+function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onDelete, globalLock, upscaleCooldownTime, isManualBatchProcessing, isGenerating }: { 
+  img: any, 
+  idx: number, 
+  onManualAction: (idx: number, type: "remove_bg" | "upscale") => void, 
+  onCropOpen: (idx: number) => void, 
+  onPreview: (url: string) => void, 
+  onDelete: (id: string) => void, 
+  globalLock: boolean, 
+  upscaleCooldownTime: number, 
+  isManualBatchProcessing: boolean, 
+  isGenerating: boolean 
+}) {
+  const [showMenu, setShowMenu] = useState(false);
+
+  return (
+    <div 
+      className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group overflow-hidden animate-in fade-in duration-300 cursor-pointer"
+      onClick={() => setShowMenu(!showMenu)}
+    >
+      {/* Visual Hint for Mobile */}
+      <div className={clsx(
+        "absolute top-3 right-3 text-white/40 sm:hidden transition-opacity z-20",
+        showMenu ? "opacity-0" : "opacity-100"
+      )}>
+        <MoreVertical className="w-5 h-5 drop-shadow-lg" />
+      </div>
+
+       {/* Status Badges - Hide when menu is active */}
+       {!showMenu && (
+         <div className="absolute top-2 left-2 flex gap-1 z-20">
+            {img.url !== img.originalUrl && <div className="bg-indigo-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">B-FREE</div>}
+            {img.upscaledUrl && <div className="bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">4K</div>}
+         </div>
+       )}
+       
+       {/* Centered Processing Loader */}
+       {(img.isProcessing || img.isUpscaling) && (
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-30 flex items-center justify-center">
+             <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
+          </div>
+       )}
+
+       <div className={clsx(
+         "absolute inset-0 bg-zinc-950/90 backdrop-blur-md transition-all duration-300 z-10 flex flex-col items-center justify-center pt-8 pb-4 px-4 gap-3",
+         (img.isProcessing || img.isUpscaling) ? "hidden" : showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+       )}>
+          {/* Dedicated Close Button for Mobile Overlay - Styled better */}
+          {showMenu && (
+            <button 
+              onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
+              className="absolute top-2 right-2 p-1 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full text-white/60 sm:hidden z-30 border border-white/10"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+
+          <div className="grid grid-cols-3 gap-2 w-full">
+             <button 
+               onClick={(e) => { e.stopPropagation(); onManualAction(idx, "remove_bg"); }} 
+               disabled={img.isProcessing || img.url !== img.originalUrl || globalLock} 
+               className="py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 disabled:opacity-40 transition-colors"
+               title="Remove BG"
+             >
+                <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">BG</span>
+             </button>
+             <button 
+               onClick={(e) => { e.stopPropagation(); onManualAction(idx, "upscale"); }} 
+               disabled={img.isUpscaling || !!img.upscaledUrl || globalLock} 
+               className="py-2.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg flex flex-col items-center justify-center gap-1 shadow-lg shadow-indigo-500/20 disabled:opacity-40 transition-colors"
+               title="Upscale 4K"
+             >
+                <Sparkles className="w-4 h-4" />
+                <span className="text-[8px] font-bold hidden sm:inline">4K</span>
+             </button>
+             <button 
+               onClick={(e) => { e.stopPropagation(); onCropOpen(idx); }} 
+               disabled={img.isProcessing || img.isUpscaling || globalLock || isManualBatchProcessing || isGenerating} 
+               className="py-2.5 bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg flex flex-col items-center justify-center gap-1 border border-pink-500/30 disabled:opacity-40 transition-colors"
+               title="Crop"
+             >
+                <Scissors className="w-4 h-4" />
+                <span className="text-[8px] font-bold hidden sm:inline">Crop</span>
+             </button>
+          </div>
+          
+          <div className="flex w-full gap-2 border-t border-white/10 pt-3">
+            <button onClick={(e) => { e.stopPropagation(); onPreview(img.upscaledUrl || img.url); }} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex justify-center transition-colors" title="Preview"><Maximize className="w-4 h-4" /></button>
+            <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, `Sticker_${idx}.png`); }} className="flex-1 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex justify-center transition-colors shadow-inner" title="Download"><Download className="w-4 h-4" /></button>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(img.id); }} className="flex-1 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg flex justify-center transition-colors border border-red-500/20" title="Hapus"><Trash2 className="w-4 h-4" /></button>
+          </div>
+       </div>
+
+       {/* Main Image */}
+       <img 
+         src={img.upscaledUrl || img.url} 
+         alt="Manual" 
+         className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" 
+       />
     </div>
   );
 }
