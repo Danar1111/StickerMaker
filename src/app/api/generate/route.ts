@@ -1,58 +1,60 @@
 import { NextResponse } from "next/server";
+import https from "node:https";
 
-export const maxDuration = 60; // Max duration for Vercel
+export const maxDuration = 60;
 
-// Upload base64 data URL ke Replicate Files API, return hosted URL
-async function uploadToReplicate(dataUrl: string, token: string): Promise<string> {
-    // Jika sudah berupa URL biasa (bukan base64), langsung kembalikan
-    if (!dataUrl.startsWith("data:")) return dataUrl;
+// Native HTTPS request — bypasses Next.js patched fetch yang menyebabkan ETIMEDOUT
+function httpsRequest(url: string, options: { method?: string; headers?: Record<string, string>; body?: string; }): Promise<{ status: number; data: any }> {
+    return new Promise((resolve, reject) => {
+        const parsedUrl = new URL(url);
+        const req = https.request({
+            hostname: parsedUrl.hostname,
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: options.method || "GET",
+            headers: options.headers || {},
+            family: 4, // Force IPv4
+            timeout: 120000, // 2 min timeout
+        }, (res) => {
+            let data = "";
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => {
+                try {
+                    resolve({ status: res.statusCode || 200, data: JSON.parse(data) });
+                } catch {
+                    resolve({ status: res.statusCode || 200, data });
+                }
+            });
+        });
 
-    const base64Data = dataUrl.split(",")[1];
-    const mimeMatch = dataUrl.match(/data:([^;]+);/);
-    const mimeType = mimeMatch ? mimeMatch[1] : "image/png";
-    const ext = mimeType.includes("png") ? "png" : "jpg";
+        req.on("error", reject);
+        req.on("timeout", () => { req.destroy(); reject(new Error("Request timeout (120s)")); });
 
-    const buffer = Buffer.from(base64Data, "base64");
-    const blob = new Blob([buffer], { type: mimeType });
-
-    const formData = new FormData();
-    formData.append("content", blob, `upload.${ext}`);
-
-    console.log(`[Upload] Uploading ${Math.round(buffer.length / 1024)} KB to Replicate Files API...`);
-
-    const res = await fetch("https://api.replicate.com/v1/files", {
-        method: "POST",
-        headers: { "Authorization": `Token ${token}` },
-        body: formData,
+        if (options.body) req.write(options.body);
+        req.end();
     });
-
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`File upload gagal (${res.status}): ${errText}`);
-    }
-
-    const data = await res.json();
-    console.log(`[Upload] Sukses! URL: ${data.urls.get}`);
-    return data.urls.get;
 }
 
 async function runReplicateModel(owner: string, name: string, input: any, token: string) {
-    const initRes = await fetch(`https://api.replicate.com/v1/models/${owner}/${name}/predictions`, {
-        method: "POST",
-        headers: {
-            "Authorization": `Token ${token}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ input })
-    });
-    const initData = await initRes.json();
+    const { status, data: initData } = await httpsRequest(
+        `https://api.replicate.com/v1/models/${owner}/${name}/predictions`,
+        {
+            method: "POST",
+            headers: {
+                "Authorization": `Token ${token}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ input })
+        }
+    );
     if (initData.error) throw new Error(initData.error);
     
     let predictionUrl = initData.urls.get;
-    console.log(`[Replicate] Start Model: ${owner}/${name}, URL: ${predictionUrl}`);
+    console.log(`[Replicate] Start Model: ${owner}/${name}, Status: ${status}`);
+    
     while (true) {
-        const pollRes = await fetch(predictionUrl, { headers: { "Authorization": `Token ${token}` } });
-        const pollData = await pollRes.json();
+        const { data: pollData } = await httpsRequest(predictionUrl, {
+            headers: { "Authorization": `Token ${token}` }
+        });
         if (pollData.status === "succeeded") return pollData.output;
         if (pollData.status === "failed") throw new Error(pollData.error || "Replicate prediction failed");
         await new Promise(r => setTimeout(r, 1500));
@@ -60,22 +62,26 @@ async function runReplicateModel(owner: string, name: string, input: any, token:
 }
 
 async function runReplicate(version: string, input: any, token: string) {
-    const initRes = await fetch("https://api.replicate.com/v1/predictions", {
-        method: "POST",
-        headers: {
-            "Authorization": `Token ${token}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ version, input })
-    });
-    const initData = await initRes.json();
+    const { status, data: initData } = await httpsRequest(
+        "https://api.replicate.com/v1/predictions",
+        {
+            method: "POST",
+            headers: {
+                "Authorization": `Token ${token}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ version, input })
+        }
+    );
     if (initData.error) throw new Error(initData.error);
     
     let predictionUrl = initData.urls.get;
-    console.log(`[Replicate] Start Version: ${version.substring(0,8)}..., URL: ${predictionUrl}`);
+    console.log(`[Replicate] Start Version: ${version.substring(0,8)}..., Status: ${status}`);
+    
     while (true) {
-        const pollRes = await fetch(predictionUrl, { headers: { "Authorization": `Token ${token}` } });
-        const pollData = await pollRes.json();
+        const { data: pollData } = await httpsRequest(predictionUrl, {
+            headers: { "Authorization": `Token ${token}` }
+        });
         if (pollData.status === "succeeded") return pollData.output;
         if (pollData.status === "failed") throw new Error(pollData.error || "Replicate prediction failed");
         await new Promise(r => setTimeout(r, 1500));
@@ -83,22 +89,23 @@ async function runReplicate(version: string, input: any, token: string) {
 }
 
 async function runOpenAI(prompt: string, key: string) {
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${key}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            model: "dall-e-3",
-            prompt,
-            n: 1,
-            size: "1024x1024",
-            response_format: "url"
-        })
-    });
-    
-    const data = await response.json();
+    const { data } = await httpsRequest(
+        "https://api.openai.com/v1/images/generations",
+        {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${key}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                model: "dall-e-3",
+                prompt,
+                n: 1,
+                size: "1024x1024",
+                response_format: "url"
+            })
+        }
+    );
     if (data.error) throw new Error(data.error.message);
     return data.data[0].url;
 }
@@ -131,7 +138,6 @@ export async function POST(req: Request) {
         }
 
         if (action === "verify_pin") {
-            // Jika eksekusi berhasil mencapai baris ini, berarti blok Security Check "x-admin-pin" di atas sudah lolos. (PIN Cocok!) 
             return NextResponse.json({ success: true, message: "PIN Valid" });
         }
 
@@ -168,27 +174,20 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             const payloadSize = imageUrl ? Math.round(imageUrl.length / 1024) : 0;
             console.log(`[API] Action: remove_bg, Payload Size: ${payloadSize} KB`);
             
-            // Upload gambar ke Replicate Files API dulu, lalu kirim URL-nya saja
-            const hostedUrl = await uploadToReplicate(imageUrl, replicateToken);
-            console.log(`[API] Hosted URL: ${hostedUrl}`);
-            
             const rembgModelVersion = "fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003";
             const transparentImageUrl = await runReplicate(
                 rembgModelVersion,
-                { image: hostedUrl },
+                { image: imageUrl },
                 replicateToken
             );
             return NextResponse.json({ imageUrl: transparentImageUrl });
         }
 
         else if (action === "upscale") {
-            // Upload gambar ke Replicate Files API dulu jika masih base64
-            const hostedUrl = await uploadToReplicate(imageUrl, replicateToken);
-            
             const esrganModelVersion = "42fed1c4974146d4d2414e2be2c5277c7fcf05fcc3a73abf41610695738c1d7b";
             const upscaledImageUrl = await runReplicate(
                 esrganModelVersion,
-                { image: hostedUrl, scale: 4, face_enhance: false },
+                { image: imageUrl, scale: 4, face_enhance: false },
                 replicateToken
             );
             return NextResponse.json({ imageUrl: upscaledImageUrl });
