@@ -8,7 +8,7 @@ async function runReplicateModel(owner: string, name: string, input: any, token:
         headers: {
             "Authorization": `Token ${token}`,
             "Content-Type": "application/json",
-            "Prefer": "wait"
+            // Menghapus 'Prefer: wait' untuk mencegah ETIMEDOUT di VPS
         },
         body: JSON.stringify({ input })
     });
@@ -16,6 +16,7 @@ async function runReplicateModel(owner: string, name: string, input: any, token:
     if (initData.error) throw new Error(initData.error);
     
     let predictionUrl = initData.urls.get;
+    console.log(`[Replicate] Start Model: ${owner}/${name}, URL: ${predictionUrl}`);
     while (true) {
         const pollRes = await fetch(predictionUrl, { headers: { "Authorization": `Token ${token}` } });
         const pollData = await pollRes.json();
@@ -31,7 +32,7 @@ async function runReplicate(version: string, input: any, token: string) {
         headers: {
             "Authorization": `Token ${token}`,
             "Content-Type": "application/json",
-            "Prefer": "wait"
+            // Menghapus 'Prefer: wait' untuk mencegah ETIMEDOUT di VPS
         },
         body: JSON.stringify({ version, input })
     });
@@ -39,6 +40,7 @@ async function runReplicate(version: string, input: any, token: string) {
     if (initData.error) throw new Error(initData.error);
     
     let predictionUrl = initData.urls.get;
+    console.log(`[Replicate] Start Version: ${version.substring(0,8)}..., URL: ${predictionUrl}`);
     while (true) {
         const pollRes = await fetch(predictionUrl, { headers: { "Authorization": `Token ${token}` } });
         const pollData = await pollRes.json();
@@ -131,6 +133,9 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
         } 
         
         else if (action === "remove_bg") {
+            const payloadSize = imageUrl ? Math.round(imageUrl.length / 1024) : 0;
+            console.log(`[API] Action: remove_bg, Payload Size: ${payloadSize} KB`);
+            
             const rembgModelVersion = "fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003";
             const transparentImageUrl = await runReplicate(
                 rembgModelVersion,
