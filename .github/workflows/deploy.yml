@@ -2,18 +2,26 @@ name: Deploy to VPS
 
 on:
   push:
-    branches:
-      - main
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Executing remote ssh commands using ssh key
-        uses: appleboy/ssh-action@master
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -25,17 +33,9 @@ jobs:
             
             cd /var/www/StickerMaker
             
-            echo "Menarik kode terbaru dari GitHub..."
             git pull origin main
             
-            echo "Menginstal dependensi (npm install)..."
             npm install
-            
-            echo "Membangun aplikasi (npm run build)..."
             npm run build
-            
-            echo "Merestart aplikasi di PM2 (Port 3002)..."
 
-            pm2 restart sticker-maker || pm2 start npm --name "sticker-maker" -- start
-            
-            echo "Deployment Selesai!"
+            pm2 reload sticker-maker || pm2 start npm --name "sticker-maker" -- start -- -p 3002
