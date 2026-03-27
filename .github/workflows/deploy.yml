@@ -36,6 +36,7 @@ jobs:
             git pull origin main
             
             npm install
+            
             npm run build
 
             pm2 reload sticker-maker || pm2 start npm --name "sticker-maker" -- start -- -p 3002
