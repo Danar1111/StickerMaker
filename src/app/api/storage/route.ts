@@ -50,21 +50,16 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(targetPath, imageBuffer);
 
     // 4. Delete old file if provided (with Dual Path Deletion)
-    const debugLogs: string[] = [];
     if (deleteOldPath) {
-        // Strip proxy prefix if present
         const actualDeletePath = deleteOldPath.includes('/api/storage/view') 
             ? deleteOldPath.split('/api/storage/view')[1] 
             : deleteOldPath;
 
         if (actualDeletePath.startsWith('/outputs/')) {
-            // Aggressive normalization for Linux/VPS paths
-            const normalizedPath = actualDeletePath.replace(/^\/+/, ''); // Remove all leading slashes
+            const normalizedPath = actualDeletePath.replace(/^\/+/, '');
             const oldFileAbsPath = path.join(process.cwd(), 'public', normalizedPath);
             const altFileAbsPath = path.resolve('./public', normalizedPath);
             
-            debugLogs.push(`[STORAGE] Deleting: ${oldFileAbsPath}`);
-
             try {
                 let exists = await fs.access(oldFileAbsPath).then(() => true).catch(() => false);
                 let targetDelete = oldFileAbsPath;
@@ -76,24 +71,10 @@ export async function POST(req: NextRequest) {
 
                 if (exists) {
                     await fs.unlink(targetDelete);
-                    debugLogs.push(`[STORAGE] SUCCESS: Deleted old file at ${targetDelete}`);
-                } else {
-                    debugLogs.push(`[STORAGE] SKIP: File Not Found at ${oldFileAbsPath} or ${altFileAbsPath}`);
                 }
             } catch (e: any) {
-                const errMsg = `[STORAGE] FAILED: ${e.code} - ${e.message}`;
-                debugLogs.push(errMsg);
-                console.error(errMsg);
+                console.error(`[STORAGE] Deletion failed for ${actualDeletePath}:`, e.message);
             }
-
-            // Write to persistent debug log for AI monitoring
-            const logEntry = `[${new Date().toISOString()}] Action: SAVE, New: ${filename}, Deleting: ${actualDeletePath}, Status: ${debugLogs.join(' | ')}\n`;
-            await fs.appendFile(path.join(process.cwd(), 'public', 'storage-debug.txt'), logEntry).catch(() => {});
-
-            return NextResponse.json({ 
-                localUrl: `/outputs/${category}/${filename}`, 
-                debug: debugLogs 
-            });
         }
     }
 
@@ -119,7 +100,6 @@ export async function DELETE(req: NextRequest) {
         return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
       }
   
-      // Aggressive normalization and Dual Path Deletion
       const normalizedPath = filePath.replace(/^\/+/, ''); 
       const absPath = path.join(process.cwd(), 'public', normalizedPath);
       const altPath = path.resolve('./public', normalizedPath);

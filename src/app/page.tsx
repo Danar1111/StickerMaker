@@ -546,24 +546,15 @@ export default function Home() {
   // --- STORAGE HELPERS ---
   const saveFileLocally = async (url: string, category: 'gen' | 'manual' | 'vector', oldPath?: string) => {
     try {
-      console.log(`[STORAGE-UI] Calling saveFileLocally:`, { category, oldPath });
       const res = await fetch('/api/storage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
         body: JSON.stringify({ imageUrl: url, category, deleteOldPath: oldPath }),
       });
       const data = await res.json();
-      console.log(`[STORAGE-UI] saveFileLocally result:`, data);
-      if (data.debug) {
-        data.debug.forEach((log: string) => console.log(`[STORAGE-DEBUG] ${log}`));
-      }
       return `/api/storage/view${data.localUrl}`;
     } catch (err) {
       console.error("Local storage error:", err);
-      // v12.5: Visual feedback for storage failures
-      if (url.startsWith('blob:')) {
-          console.warn("[STORAGE] Saving failed, keeping blob URL temporarily.");
-      }
       return url; 
     }
   };
@@ -578,7 +569,6 @@ export default function Home() {
     if (!actualPath || !actualPath.startsWith('/outputs/')) return;
     
     try {
-      console.log(`[STORAGE-UI] Calling deleteFileLocally:`, { actualPath });
       await fetch('/api/storage', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
