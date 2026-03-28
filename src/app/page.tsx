@@ -776,6 +776,50 @@ export default function Home() {
     }
   };
 
+  const handleSaveCleanup = async () => {
+    if (!studioTarget || !cleanupCanvasRef.current) return;
+    const { idx, tab } = studioTarget;
+    setIsCleaning(true);
+    try {
+      const resultUrl = cleanupCanvasRef.current.toDataURL("image/png");
+      
+      if (tab === 'gen') {
+        setGeneratedImages(prev => {
+          const newImages = [...prev];
+          if (!newImages[idx]) return prev;
+          newImages[idx] = { 
+            ...newImages[idx], 
+            url: resultUrl, 
+            upscaledUrl: undefined 
+          };
+          return newImages;
+        });
+      } else {
+        setManualImages(prev => {
+          const newImages = [...prev];
+          if (!newImages[idx]) return prev;
+          newImages[idx] = { 
+            ...newImages[idx], 
+            url: resultUrl, 
+            originalUrl: resultUrl, 
+            upscaledUrl: undefined,
+            isBackgroundRemoved: true
+          };
+          return newImages;
+        });
+      }
+      setStudioTarget(null);
+      setShowStudioControls(false);
+      setCleanupHistory([]);
+      setCleanupRedoStack([]);
+    } catch (e) {
+      console.error(e);
+      alert("Gagal menyimpan pembersihan.");
+    } finally {
+      setIsCleaning(false);
+    }
+  };
+
   const handleSaveRefine = async () => {
     if (!studioTarget) return;
     const { idx, tab } = studioTarget;
@@ -1935,7 +1979,11 @@ export default function Home() {
 
                 <div className="pt-6 border-t border-white/5">
                   <button 
-                    onClick={studioMode === 'CROP' ? handleSaveCrop : handleSaveRefine}
+                    onClick={() => {
+                      if (studioMode === 'CROP') handleSaveCrop();
+                      else if (studioMode === 'CLEANUP') handleSaveCleanup();
+                      else handleSaveRefine();
+                    }}
                     disabled={isCropping || isRefining || isCleaning}
                     className="w-full py-4 bg-indigo-500 hover:bg-indigo-400 text-white rounded-2xl flex items-center justify-center gap-2 font-black uppercase tracking-widest shadow-lg shadow-indigo-500/30 transition-all active:scale-95 disabled:opacity-50"
                   >
