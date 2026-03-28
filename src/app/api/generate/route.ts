@@ -188,14 +188,30 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             return NextResponse.json({ imageUrl: transparentImageUrl });
         }
 
-        else if (action === "upscale") {
-            const esrganModelVersion = "42fed1c4974146d4d2414e2be2c5277c7fcf05fcc3a73abf41610695738c1d7b";
-            const upscaledImageUrl = await runReplicate(
-                esrganModelVersion,
-                { image: imageUrl, scale: 4, face_enhance: false },
+        else if (action === "generate_vector") {
+            const { prompt, stylePrefix, isPro } = body;
+            if (!prompt) return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
+
+            // Recraft V4 SVG Models on Replicate
+            const modelName = isPro 
+                ? "recraft-v4-pro-svg" 
+                : "recraft-v4-svg";
+
+            // V4 is prompt-driven, so we bake the style into the prompt
+            const finalPrompt = stylePrefix ? `${stylePrefix} ${prompt}` : prompt;
+
+            const output = await runReplicateModel(
+                "recraft-ai",
+                modelName,
+                {
+                    prompt: finalPrompt,
+                    aspect_ratio: "1:1"
+                },
                 replicateToken
             );
-            return NextResponse.json({ imageUrl: upscaledImageUrl });
+
+            // Replicate returns a URI string for these models
+            return NextResponse.json({ imageUrl: output });
         }
 
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });

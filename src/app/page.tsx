@@ -30,7 +30,11 @@ import {
   Hand,
   ZoomIn,
   ZoomOut,
-  Maximize
+  Maximize,
+  Shapes,
+  Palette,
+  Briefcase,
+  AlertCircle
 } from "lucide-react";
 import ReactCrop, { Crop, PixelCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -50,6 +54,19 @@ const STYLES = [
   "Pop Art Comic", "Minimalist Line Art", "Low Poly", "Origami Papercraft",
   "Claymation / Plasticine", "Graffiti Street Art"
 ];
+
+const VECTOR_STYLES = [
+  { id: "minimalist", name: "✨ Minimalist 2D", prefix: "Clean minimalist vector illustration, flat design, sharp edges, 2D vector graphic, isolated" },
+  { id: "isometric", name: "📐 Isometric 3D", prefix: "Premium isometric 3D vector object, stylized perspective, sharp vector lines, isolated asset" },
+  { id: "mascot", name: "🐻 Mascot Sticker", prefix: "Professional mascot sticker vector, bold clean outlines, vibrant colors, isolated asset, white border" },
+  { id: "kawaii", name: "🎀 Kawaii Cute", prefix: "Kawaii sticker vector, cute aesthetic, soft colors, thick rounded outlines, isolated subject, pastel palette" },
+  { id: "logo", name: "💎 Logo Branding", prefix: "Professional vector logo asset, minimalist branding, geometric shapes, high-contrast, scalable, clean paths" },
+  { id: "pop-art", name: "💥 Retro Pop-Art", prefix: "Pop-art vector sticker, bold comic style, vibrant saturated colors, heavy outlines, dot pattern accents" },
+  { id: "line-art", name: "✒️ Pro Line-Art", prefix: "Fine line-art vector illustration, crisp black paths, professional monochrome stroke, clean curves" },
+  { id: "abstract", name: "🧩 Geometric Abstract", prefix: "Abstract geometric vector art, modern generative style, crisp paths, professional composition, sharp edges" },
+];
+
+const VECTOR_PIN = process.env.NEXT_PUBLIC_VECTOR_STUDIO_PIN || "SVGVIP";
 
 
 // Helper to get cropped image as data URL
@@ -149,8 +166,20 @@ export default function Home() {
   const [isClient, setIsClient] = useState(false);
 
   // Layout State
-  const [activeTab, setActiveTab] = useState<"generator" | "manual">("generator");
+  const [activeTab, setActiveTab] = useState<"generator" | "manual" | "vector">("generator");
   const [rembgModel, setRembgModel] = useState<'standard' | 'smart'>('standard');
+  const [isVectorWarningOpen, setIsVectorWarningOpen] = useState(false);
+  const [vectorPinInput, setVectorPinInput] = useState("");
+  const [isVectorAuthenticated, setIsVectorAuthenticated] = useState(false);
+  
+  // Vector Mode State (v12.0)
+  const [vectorPrompt, setVectorPrompt] = useState("");
+  const [vectorStyle, setVectorStyle] = useState(VECTOR_STYLES[0]);
+  const [vectorBatchSize, setVectorBatchSize] = useState(1);
+  const [isVectorPro, setIsVectorPro] = useState(false);
+  const [isVectorGenerating, setIsVectorGenerating] = useState(false);
+  const [vectorImages, setVectorImages] = useState<{id: string, url: string, timestamp: number, isPro: boolean}[]>([]);
+  const [isProSwitchModalOpen, setIsProSwitchModalOpen] = useState(false);
 
   // Upscale Rate Limiting State
   const [globalUpscaleState, setGlobalUpscaleState] = useState<"IDLE" | "PROCESSING" | "COOLDOWN">("IDLE");
@@ -235,7 +264,44 @@ export default function Home() {
     } else {
        setIsAuthenticated(false);
     }
+
+    // Load AI Generator History
+    const savedGen = localStorage.getItem("sticker_gen_v1");
+    if (savedGen) {
+      try { setGeneratedImages(JSON.parse(savedGen)); } catch(e) { console.error(e); }
+    }
+
+    // Load Manual Tool History
+    const savedManual = localStorage.getItem("sticker_manual_v1");
+    if (savedManual) {
+      try { setManualImages(JSON.parse(savedManual)); } catch(e) { console.error(e); }
+    }
+
+    // Load Vector Studio History
+    const savedVector = localStorage.getItem("sticker_vector_v1");
+    if (savedVector) {
+      try { setVectorImages(JSON.parse(savedVector)); } catch(e) { console.error(e); }
+    }
   }, []);
+
+  // Sync History for all tabs
+  useEffect(() => {
+    if (isClient) {
+      localStorage.setItem("sticker_gen_v1", JSON.stringify(generatedImages));
+    }
+  }, [generatedImages, isClient]);
+
+  useEffect(() => {
+    if (isClient) {
+      localStorage.setItem("sticker_manual_v1", JSON.stringify(manualImages));
+    }
+  }, [manualImages, isClient]);
+
+  useEffect(() => {
+    if (isClient) {
+      localStorage.setItem("sticker_vector_v1", JSON.stringify(vectorImages));
+    }
+  }, [vectorImages, isClient]);
 
   // Close style dropdown on click outside
   useEffect(() => {
@@ -461,6 +527,62 @@ export default function Home() {
       alert(`Error: ${err.message}`);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateVector = async () => {
+    if (!vectorPrompt.trim() || isVectorGenerating) return;
+    setIsVectorGenerating(true);
+    setProgress(0);
+    setProgressText("Initializing Vector Engine...");
+
+    try {
+      const results: {id: string, url: string, timestamp: number, isPro: boolean}[] = [];
+      for (let i = 0; i < vectorBatchSize; i++) {
+        setProgress(Math.round(((i) / vectorBatchSize) * 100));
+        setProgressText(`Generating Vector ${i + 1} of ${vectorBatchSize}...`);
+        
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
+          body: JSON.stringify({ 
+            action: "generate_vector", 
+            prompt: vectorPrompt,
+            stylePrefix: vectorStyle.prefix,
+            isPro: isVectorPro
+          }),
+        });
+        
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Generation failed");
+        
+        results.push({
+          id: Math.random().toString(36).substr(2, 9),
+          url: data.imageUrl,
+          timestamp: Date.now(),
+          isPro: isVectorPro
+        });
+
+        if (i < vectorBatchSize - 1) await new Promise(r => setTimeout(r, 1000));
+      }
+      
+      setVectorImages(prev => [...results, ...prev]);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsVectorGenerating(false);
+      setProgress(100);
+      setProgressText("");
+    }
+  };
+
+  const handleDeleteVector = (id: string) => {
+    setVectorImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  const handleClearAllVector = () => {
+    if (confirm("Hapus semua riwayat Vector Studio?")) {
+      setVectorImages([]);
     }
   };
 
@@ -1039,16 +1161,29 @@ export default function Home() {
              <button 
                onClick={() => { setActiveTab("generator"); setStudioTarget(null); setPreviewImage(null); }} 
                disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
-               className={clsx("px-3 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
+               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
              > 
-               <Zap className="w-3.5 h-3.5 md:w-4 h-4" /> AI Generator 
+               <Zap className="w-3.5 h-3.5 md:w-4 h-4" /> 
+               <span className="md:hidden">AI</span>
+               <span className="hidden md:inline">AI Generator</span>
              </button>
              <button 
                onClick={() => { setActiveTab("manual"); setStudioTarget(null); setPreviewImage(null); }} 
                disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
-               className={clsx("px-3 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
+               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
              > 
-               <Upload className="w-3.5 h-3.5 md:w-4 h-4" /> Manual Tool 
+               <Upload className="w-3.5 h-3.5 md:w-4 h-4" /> 
+               <span className="md:hidden">Tool</span>
+               <span className="hidden md:inline">Manual Tool</span>
+             </button>
+             <button 
+               onClick={() => { setActiveTab("vector"); setStudioTarget(null); setPreviewImage(null); setIsVectorWarningOpen(true); }} 
+               disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "vector" ? "bg-emerald-500 text-white shadow-lg" : "text-zinc-500")}
+             > 
+               <Shapes className="w-3.5 h-3.5 md:w-4 h-4" /> 
+               <span className="md:hidden">Vector</span>
+               <span className="hidden md:inline">Vector Studio</span>
              </button>
           </div>
 
@@ -1141,9 +1276,61 @@ export default function Home() {
                   <div className="space-y-2"> {MODES.map(m => <button key={m.id} onClick={() => setMode(m.id)} className={clsx("w-full p-3 rounded-xl border flex items-center gap-3 transition-colors", mode === m.id ? "border-pink-500 bg-pink-500/10" : "border-white/10 hover:bg-white/5")}> <m.icon className="w-5 h-5 text-indigo-400" /> <div className="text-left"><div className="text-sm font-bold">{m.name}</div><div className="text-[10px] text-zinc-500 leading-tight">{m.desc}</div></div> </button>)} </div>
                 </div>
 
-                <button onClick={handleGenerate} disabled={isGenerating || !prompt.trim()} className="w-full py-4 rounded-xl bg-indigo-500 text-white font-bold disabled:opacity-50"> {isGenerating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Generate Batch"} </button>
+                 <button onClick={handleGenerate} disabled={isGenerating || !prompt.trim()} className="w-full py-4 rounded-xl bg-indigo-500 text-white font-bold disabled:opacity-50"> {isGenerating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Generate Batch"} </button>
               </div>
             </div>
+          ) : activeTab === "vector" ? (
+             <div className="glass-panel p-6 rounded-2xl relative overflow-hidden group">
+               <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-cyan-500" />
+               <h2 className="text-xl font-bold mb-6 flex items-center gap-2"> <Shapes className="w-5 h-5 text-emerald-400" /> Vector Generator </h2>
+               
+               <div className="space-y-6">
+                 {/* Vector Prompt */}
+                 <div className="space-y-2">
+                   <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Descriptive Prompt</label>
+                   <textarea value={vectorPrompt} onChange={(e) => setVectorPrompt(e.target.value)} placeholder="e.g. A cute futuristic robot cat icon, minimalist clean lines..." className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[100px] resize-none" />
+                 </div>
+
+                 {/* Vector Style Selector */}
+                 <div className="space-y-2">
+                   <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Vector Aesthetic</label>
+                   <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-white/10">
+                      {VECTOR_STYLES.map(style => (
+                        <button key={style.id} onClick={() => setVectorStyle(style)} className={clsx("p-2 rounded-xl border text-[10px] font-bold transition-all", vectorStyle.id === style.id ? "bg-emerald-500/20 border-emerald-500 text-emerald-400" : "bg-white/5 border-white/5 text-zinc-500 hover:bg-white/10 hover:text-zinc-300")}>
+                          {style.name}
+                        </button>
+                      ))}
+                   </div>
+                 </div>
+
+                 {/* Batch Size & Pro Toggle */}
+                 <div className="flex flex-col gap-4 p-4 bg-black/40 rounded-2xl border border-white/5">
+                    <div className="flex justify-between items-center">
+                       <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Pro Mode (V4 Pro)</span>
+                       <button onClick={() => { if(!isVectorPro) setIsProSwitchModalOpen(true); else setIsVectorPro(false); }} className={clsx("w-12 h-6 rounded-full p-1 transition-all", isVectorPro ? "bg-emerald-500" : "bg-zinc-800")}>
+                          <div className={clsx("w-4 h-4 rounded-full bg-white transition-all shadow-md", isVectorPro ? "translate-x-6" : "translate-x-0")} />
+                       </button>
+                    </div>
+
+                    <div className="space-y-2">
+                       <div className="flex justify-between text-[10px] font-bold text-zinc-500">
+                          <span>BATCH SIZE</span>
+                          <span className="text-emerald-400">{vectorBatchSize}</span>
+                       </div>
+                       <input type="range" min="1" max="10" value={vectorBatchSize} onChange={(e) => setVectorBatchSize(parseInt(e.target.value))} className="w-full accent-emerald-500 cursor-pointer" />
+                    </div>
+
+                    <div className="pt-2 border-t border-white/5 flex justify-between items-center">
+                       <span className="text-[10px] text-zinc-500 font-bold">ESTIMATED COST</span>
+                       <span className="text-xs font-black text-white">${(vectorBatchSize * (isVectorPro ? 0.30 : 0.08)).toFixed(2)}</span>
+                    </div>
+                 </div>
+
+                 <button onClick={handleGenerateVector} disabled={isVectorGenerating || !vectorPrompt.trim()} className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold disabled:opacity-50 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"> 
+                    {isVectorGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Zap className="w-4 h-4" /> Generate Vector Assets</>}
+                 </button>
+               </div>
+             </div>
           ) : (
             <div className="glass-panel p-6 rounded-2xl">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2"> <Upload className="w-5 h-5 text-pink-400" /> Manual Upload </h2>
@@ -1184,63 +1371,86 @@ export default function Home() {
         <div className="lg:col-span-8 flex flex-col min-h-[600px]">
           <div className="glass-panel p-6 rounded-2xl flex-1 flex flex-col">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold flex items-center gap-2"> <ImageIcon className="w-5 h-5 text-pink-400" /> Production Gallery </h2>
-              {(activeTab === "generator" ? generatedImages.length : manualImages.length) > 0 && (
-                <button onClick={() => handleDownloadZip(activeTab === "generator" ? "gen" : "manual")} className="px-4 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold flex items-center gap-2"><Download className="w-4 h-4" /> ZIP</button>
+              <h2 className="text-xl font-bold flex items-center gap-2"> 
+                {activeTab === 'vector' ? <Shapes className="w-5 h-5 text-emerald-400" /> : <ImageIcon className="w-5 h-5 text-pink-400" />}
+                {activeTab === 'vector' ? 'Vector Asset Library' : 'Production Gallery'}
+              </h2>
+              {activeTab === 'vector' ? (
+                vectorImages.length > 0 && (
+                  <button onClick={handleClearAllVector} className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-2 border border-red-500/20"> <Trash2 className="w-3.5 h-3.5" /> Clear History </button>
+                )
+              ) : (
+                (activeTab === "generator" ? generatedImages.length : manualImages.length) > 0 && (
+                  <button onClick={() => handleDownloadZip(activeTab === "generator" ? "gen" : "manual")} className="px-4 py-2 bg-indigo-500 text-white rounded-lg text-sm font-bold flex items-center gap-2"><Download className="w-4 h-4" /> ZIP</button>
+                )
               )}
             </div>
 
-            {(isGenerating || isManualBatchProcessing) && (
-                <div className="mb-6 p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/30 animate-pulse">
-                   <p className="text-sm font-bold text-center text-indigo-400">{progressText}</p>
+            {(isGenerating || isManualBatchProcessing || isVectorGenerating) && (
+                <div className={clsx(
+                  "mb-6 p-4 rounded-xl border animate-pulse",
+                  isVectorGenerating ? "bg-emerald-500/10 border-emerald-500/30" : "bg-indigo-500/10 border-indigo-500/30"
+                )}>
+                   <p className={clsx(
+                     "text-sm font-bold text-center italic",
+                     isVectorGenerating ? "text-emerald-400" : "text-indigo-400"
+                   )}>{progressText || "Memproses permintaan anda..."}</p>
                 </div>
             )}
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {activeTab === "generator" ? generatedImages.map((img, idx) => (
-                <StickerCard 
-                  key={idx} 
-                  img={img} 
-                  onUpscale={() => handleUpscale(idx)} 
-                  onPreview={() => setPreviewImage(img.upscaledUrl || img.url)} 
-                  onRefine={(initialMode) => { 
-                    setRefineAmount(1); 
-                    setStudioMode(initialMode || 'REFINE');
-                    setStudioTarget({idx, tab: 'gen'}); 
-                  }}
-                  onDelete={() => handleDeleteAI(idx)}
-                  globalLock={globalUpscaleState !== "IDLE" || isGenerating} 
-                  upscaleCooldownTime={upscaleCooldownTime}
-                />
-              )) : manualImages.map((img, idx) => (
-                <div key={img.id} className="group relative">
-                  <ManualCard 
+              {activeTab === "vector" ? (
+                vectorImages.map((vImg) => (
+                  <VectorStickerCard key={vImg.id} img={vImg} onDelete={() => handleDeleteVector(vImg.id)} onPreview={(url) => setPreviewImage(url)} />
+                ))
+              ) : activeTab === "generator" ? (
+                generatedImages.map((img, idx) => (
+                  <StickerCard 
+                    key={idx} 
                     img={img} 
-                    idx={idx}
-                    onManualAction={handleManualAction}
-                    onCropOpen={(idx) => {
-                      setStudioTarget({idx, tab: 'manual'}); 
-                      setStudioMode('CROP');
-                      setCrop(undefined); 
-                      setCropAspect(undefined);
-                      setShowCropControls(true);
-                    }}
-                    onPreview={(url) => setPreviewImage(url)}
-                    onRefine={(idx, initialMode) => { 
+                    onUpscale={() => handleUpscale(idx)} 
+                    onPreview={() => setPreviewImage(img.upscaledUrl || img.url)} 
+                    onRefine={(initialMode) => { 
                       setRefineAmount(1); 
                       setStudioMode(initialMode || 'REFINE');
-                      setStudioTarget({idx, tab: 'manual'}); 
+                      setStudioTarget({idx, tab: 'gen'}); 
                     }}
-                    onDelete={(id) => setManualImages(m => m.filter(x => x.id !== id))}
-                    globalLock={globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating}
+                    onDelete={() => handleDeleteAI(idx)}
+                    globalLock={globalUpscaleState !== "IDLE" || isGenerating} 
                     upscaleCooldownTime={upscaleCooldownTime}
-                    isManualBatchProcessing={isManualBatchProcessing}
-                    isGenerating={isGenerating}
                   />
-                </div>
-              ))}
+                ))
+              ) : (
+                manualImages.map((img, idx) => (
+                  <div key={img.id} className="group relative">
+                    <ManualCard 
+                      img={img} 
+                      idx={idx}
+                      onManualAction={handleManualAction}
+                      onCropOpen={(idx) => {
+                        setStudioTarget({idx, tab: 'manual'}); 
+                        setStudioMode('CROP');
+                        setCrop(undefined); 
+                        setCropAspect(undefined);
+                        setShowCropControls(true);
+                      }}
+                      onPreview={(url) => setPreviewImage(url)}
+                      onRefine={(idx, initialMode) => { 
+                        setRefineAmount(1); 
+                        setStudioMode(initialMode || 'REFINE');
+                        setStudioTarget({idx, tab: 'manual'}); 
+                      }}
+                      onDelete={(id) => setManualImages(m => m.filter(x => x.id !== id))}
+                      globalLock={globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating}
+                      upscaleCooldownTime={upscaleCooldownTime}
+                      isManualBatchProcessing={isManualBatchProcessing}
+                      isGenerating={isGenerating}
+                    />
+                  </div>
+                ))
+              )}
             </div>
-            {((activeTab === "generator" ? generatedImages.length : manualImages.length) === 0) && (
+            {((activeTab === "generator" ? generatedImages.length : activeTab === "manual" ? manualImages.length : vectorImages.length) === 0) && (
               <div className="flex-1 flex flex-col items-center justify-center text-zinc-700"><ImageIcon className="w-12 h-12 mb-2 opacity-20" /> <p className="text-sm">Gallery Kosong</p></div>
             )}
           </div>
@@ -1250,7 +1460,7 @@ export default function Home() {
       {previewImage && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={previewImage} alt="Preview" className="max-w-full max-h-full object-contain" />
+          <img src={previewImage || ""} alt="Preview" className="max-w-full max-h-full object-contain" />
         </div>
       )}
 
@@ -1425,10 +1635,10 @@ export default function Home() {
                           <div 
                             className="pointer-events-none absolute border border-white/50 rounded-full bg-indigo-500/10 backdrop-blur-[1px] transform -translate-x-1/2 -translate-y-1/2 border-dashed transition-[width,height] duration-75"
                             style={{
-                              left: brushCirclePos.x,
-                              top: brushCirclePos.y,
-                              width: brushSize * zoom,
-                              height: brushSize * zoom,
+                              left: brushCirclePos?.x || 0,
+                              top: brushCirclePos?.y || 0,
+                              width: (brushSize * zoom) || 0,
+                              height: (brushSize * zoom) || 0,
                               boxShadow: '0 0 15px rgba(99, 102, 241, 0.4)'
                             }}
                           />
@@ -1691,9 +1901,150 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* --- VECTOR ENTRANCE MODAL WITH PASSWORD (v12.1) --- */}
+      {isVectorWarningOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
+           <div className="w-full max-w-xl glass-panel p-1 border border-white/20 rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+              <div className="absolute inset-x-0 -top-12 -bottom-12 bg-gradient-to-br from-emerald-500/20 via-transparent to-cyan-500/20 blur-3xl" />
+              <div className="relative bg-zinc-950/80 rounded-[2rem] p-10 flex flex-col items-center">
+                 <div className="w-24 h-24 bg-gradient-to-br from-emerald-500 to-cyan-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-500/40 mb-8 animate-in zoom-in-50 duration-500">
+                    <Lock className="w-12 h-12 text-zinc-950" />
+                 </div>
+                 <h2 className="text-3xl font-black text-white text-center mb-4 tracking-tight">Autorisasi Diperlukan</h2>
+                 <p className="text-zinc-400 text-center mb-6 leading-relaxed max-w-[360px]">
+                    Halaman ini memiliki biaya operasional tinggi. Silakan masukkan **Vector Access PIN** untuk melanjutkan.
+                 </p>
+                 
+                 <div className="w-full mb-8">
+                    <div className="relative">
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-500/50" />
+                      <input 
+                        type="password" 
+                        value={vectorPinInput}
+                        onChange={(e) => setVectorPinInput(e.target.value)}
+                        placeholder="ENTER ACCESS PIN..." 
+                        className="w-full py-4 pl-12 pr-4 bg-white/5 border border-white/10 rounded-2xl text-center font-black tracking-[0.5em] text-emerald-400 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all"
+                      />
+                    </div>
+                    {vectorPinInput && vectorPinInput !== VECTOR_PIN && (
+                      <p className="text-red-400 text-[10px] font-bold text-center mt-2 uppercase tracking-widest animate-pulse">PIN TIDAK VALID</p>
+                    )}
+                 </div>
+
+                 <div className="grid grid-cols-1 w-full gap-4">
+                    <button 
+                      onClick={() => {
+                        if (vectorPinInput === VECTOR_PIN) {
+                          setIsVectorAuthenticated(true);
+                          setIsVectorWarningOpen(false);
+                          setVectorPinInput("");
+                        }
+                      }} 
+                      disabled={vectorPinInput !== VECTOR_PIN}
+                      className="py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:grayscale text-zinc-950 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-emerald-500/20 transition-all hover:scale-[1.02] active:scale-95"
+                    >
+                       Akses Vector Studio
+                    </button>
+                    <button onClick={() => { setActiveTab("generator"); setIsVectorWarningOpen(false); setVectorPinInput(""); }} className="py-4 text-zinc-500 hover:text-white transition-colors text-sm font-bold">
+                       Kembali ke AI Generator
+                    </button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* --- PRO SWITCH WARNING MODAL (v12.0) --- */}
+      {isProSwitchModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+           <div className="w-full max-w-md glass-panel p-1 border border-emerald-500/30 rounded-[2rem] shadow-2xl">
+              <div className="bg-zinc-950/90 rounded-[1.8rem] p-8 flex flex-col items-center">
+                 <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-full flex items-center justify-center mb-6">
+                    <AlertCircle className="w-8 h-8 text-amber-500" />
+                 </div>
+                 <h3 className="text-xl font-bold text-white mb-3 text-center tracking-tight">Aktifkan Pro Vector Mode?</h3>
+                 <p className="text-zinc-500 text-sm text-center mb-8 px-4 leading-relaxed">
+                    Model **Recraft V4 Pro** menghasilkan detail geometris yang jauh lebih halus.
+                    Biaya API meningkat menjadi <span className="text-amber-400 font-bold">$0.30 per gambar</span>.
+                 </p>
+                 <div className="flex flex-col w-full gap-3">
+                    <button onClick={() => { setIsVectorPro(true); setIsProSwitchModalOpen(false); }} className="w-full py-4 bg-emerald-500 text-zinc-950 font-black rounded-xl uppercase tracking-widest shadow-xl shadow-emerald-500/20">
+                       Aktifkan Mode Pro
+                    </button>
+                    <button onClick={() => setIsProSwitchModalOpen(false)} className="w-full py-4 text-zinc-500 font-bold">Batal</button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 }
+
+function VectorStickerCard({ img, onDelete, onPreview }: {
+  img: {id: string, url: string, timestamp: number, isPro: boolean},
+  onDelete: () => void,
+  onPreview: (url: string) => void
+}) {
+  return (
+    <div className="group relative aspect-square rounded-2xl overflow-hidden bg-zinc-900 border border-white/5 hover:border-indigo-500/50 transition-all shadow-xl">
+       {/* v12.0: Checkered Background for Vector Preview */}
+      <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'conic-gradient(#fff 0.25turn, #000 0.25turn 0.5turn, #fff 0.5turn 0.75turn, #000 0.75turn)', backgroundSize: '20px 20px' }} />
+      
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <img 
+          src={img.url} 
+          alt="Vector Result" 
+          className="max-w-full max-h-full object-contain drop-shadow-2xl cursor-pointer transition-transform group-hover:scale-105"
+          onClick={() => onPreview(img.url)}
+          loading="lazy"
+        />
+      </div>
+
+      <div className="absolute top-2 left-2 flex gap-1">
+        <div className={clsx(
+          "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-tighter",
+          img.isPro ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" : "bg-zinc-800 text-zinc-400"
+        )}>
+          {img.isPro ? "Pro SVG" : "Basic SVG"}
+        </div>
+      </div>
+
+      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-sm">
+        <button 
+          onClick={(e) => { e.stopPropagation(); onPreview(img.url); }}
+          className="w-10 h-10 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95"
+          title="Full Preview"
+        >
+          <Maximize className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={(e) => { 
+            e.stopPropagation(); 
+            saveAs(img.url, `vector_${img.id}.svg`);
+          }}
+          className="w-10 h-10 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95"
+          title="Download SVG"
+        >
+          <Download className="w-5 h-5" />
+        </button>
+        <button 
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="w-10 h-10 bg-red-500/20 hover:bg-red-500/40 text-red-500 rounded-xl flex items-center justify-center transition-all hover:scale-110 active:scale-95"
+          title="Delete"
+        >
+          <Trash2 className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="absolute bottom-2 right-2 text-[8px] text-zinc-600 font-mono">
+        {new Date(img.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </div>
+    </div>
+  );
+}
+
 function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock, upscaleCooldownTime }: {
   img: any,
   onUpscale: () => void,
