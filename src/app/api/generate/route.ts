@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import https from "node:https";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 export const maxDuration = 60;
 
@@ -37,9 +39,24 @@ function httpsRequest(url: string, options: { method?: string; headers?: Record<
 /**
  * Mengambil gambar dari URL dan mengubahnya menjadi base64 secara aman.
  * Ini mencegah error 404 dari Replicate Delivery jika URL asli sudah dihapus.
+ * Juga mendukung pembacaan file lokal dari penyimpanan VPS.
  */
 async function fetchImageAsBase64(url: string): Promise<string> {
     if (url.startsWith('data:')) return url; // Sudah base64
+
+    // v12.4: Handle local VPS storage proxy URLs
+    if (url.startsWith('/api/storage/view/')) {
+        try {
+            const relativePath = url.split('/api/storage/view/')[1];
+            const absolutePath = path.join(process.cwd(), 'public', relativePath);
+            const data = await fs.readFile(absolutePath);
+            const ext = path.extname(absolutePath).substring(1) || 'png';
+            return `data:image/${ext};base64,${data.toString('base64')}`;
+        } catch (e) {
+            console.error("[API] Error reading local file for base64:", e);
+            throw new Error("Gagal membaca file lokal untuk AI.");
+        }
+    }
     
     return new Promise((resolve, reject) => {
         https.get(url, (res) => {
@@ -213,9 +230,9 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             const payloadSize = imageUrl ? Math.round(imageUrl.length / 1024) : 0;
             console.log(`[API] Action: remove_bg, Model: ${rembgModel}, Payload Size: ${payloadSize} KB`);
             
-            // v12.2: Ensure source is fetched locally to avoid 404 delivery errors
+            // v12.4: Ensure source is fetched locally (supports Replicate + local VPS storage)
             let finalImageSource = imageUrl;
-            if (imageUrl.includes('replicate.delivery')) {
+            if (imageUrl.includes('replicate.delivery') || imageUrl.includes('/api/storage/view/')) {
                 try {
                     finalImageSource = await fetchImageAsBase64(imageUrl);
                 } catch (e) {
@@ -265,9 +282,9 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
         else if (action === "upscale") {
             console.log(`[API] Action: upscale, URL: ${imageUrl?.substring(0, 50)}...`);
             
-            // v12.2: Ensure source is fetched locally to avoid 404 delivery errors
+            // v12.4: Ensure source is fetched locally (supports Replicate + local VPS storage)
             let finalImageSource = imageUrl;
-            if (imageUrl.includes('replicate.delivery')) {
+            if (imageUrl.includes('replicate.delivery') || imageUrl.includes('/api/storage/view/')) {
                 try {
                     finalImageSource = await fetchImageAsBase64(imageUrl);
                 } catch (e) {
