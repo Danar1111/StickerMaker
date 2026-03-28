@@ -50,12 +50,19 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(targetPath, imageBuffer);
 
     // 4. Delete old file if provided (for replacements)
-    if (deleteOldPath && deleteOldPath.startsWith('/outputs/')) {
-        const oldFileAbsPath = path.join(process.cwd(), 'public', deleteOldPath);
-        try {
-            await fs.unlink(oldFileAbsPath);
-        } catch (e) {
-            console.warn(`Failed to delete old file: ${deleteOldPath}`, e);
+    if (deleteOldPath) {
+        // Strip proxy prefix if present
+        const actualDeletePath = deleteOldPath.includes('/api/storage/view') 
+            ? deleteOldPath.split('/api/storage/view')[1] 
+            : deleteOldPath;
+
+        if (actualDeletePath.startsWith('/outputs/')) {
+            const oldFileAbsPath = path.join(process.cwd(), 'public', actualDeletePath);
+            try {
+                await fs.unlink(oldFileAbsPath);
+            } catch (e) {
+                console.warn(`Failed to delete old file: ${actualDeletePath}`, e);
+            }
         }
     }
 
