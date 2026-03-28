@@ -96,6 +96,45 @@ async function getCroppedImg(image: HTMLImageElement, pixelCrop: PixelCrop): Pro
     return canvas.toDataURL('image/png');
 }
 
+// --- INDEXED DB STORAGE MANAGER (v12.2) ---
+const DB_NAME = "StickerMakerDB";
+const STORE_NAME = "assets";
+
+function getDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 2);
+    request.onupgradeneeded = (e) => {
+      const db = (e.target as any).result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveToDB(key: string, data: any) {
+  try {
+    const db = await getDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).put(data, key);
+  } catch (e) {
+    console.error("DB Save Error:", e);
+  }
+}
+
+async function loadFromDB(key: string): Promise<any> {
+  try {
+    const db = await getDB();
+    return new Promise((resolve) => {
+      const request = db.transaction(STORE_NAME).objectStore(STORE_NAME).get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
 // v9.7: Ultimate Matte Fixed Engine (Gaussian Thresholding)
 async function refineAlpha(image: HTMLImageElement, amount: number): Promise<string> {
   const canvas = document.createElement('canvas');
@@ -265,19 +304,27 @@ export default function Home() {
        setIsAuthenticated(false);
     }
 
-    // Load AI Generator History
-    const savedGen = localStorage.getItem("sticker_gen_v1");
-    if (savedGen) {
-      try { setGeneratedImages(JSON.parse(savedGen)); } catch(e) { console.error(e); }
-    }
+    // Load AI Generator History from DB
+    loadFromDB("sticker_gen_v1").then(data => {
+      if (data) setGeneratedImages(data);
+      else {
+        // Fallback migration from localStorage
+        const legacy = localStorage.getItem("sticker_gen_v1");
+        if (legacy) try { setGeneratedImages(JSON.parse(legacy)); localStorage.removeItem("sticker_gen_v1"); } catch(e){}
+      }
+    });
 
-    // Load Manual Tool History
-    const savedManual = localStorage.getItem("sticker_manual_v1");
-    if (savedManual) {
-      try { setManualImages(JSON.parse(savedManual)); } catch(e) { console.error(e); }
-    }
+    // Load Manual Tool History from DB
+    loadFromDB("sticker_manual_v1").then(data => {
+      if (data) setManualImages(data);
+      else {
+        // Fallback migration
+        const legacy = localStorage.getItem("sticker_manual_v1");
+        if (legacy) try { setManualImages(JSON.parse(legacy)); localStorage.removeItem("sticker_manual_v1"); } catch(e){}
+      }
+    });
 
-    // Load Vector Studio History
+    // Load Vector Studio History (Stay on localStorage as it's safe and small)
     const savedVector = localStorage.getItem("sticker_vector_v1");
     if (savedVector) {
       try { setVectorImages(JSON.parse(savedVector)); } catch(e) { console.error(e); }
@@ -287,13 +334,13 @@ export default function Home() {
   // Sync History for all tabs
   useEffect(() => {
     if (isClient) {
-      localStorage.setItem("sticker_gen_v1", JSON.stringify(generatedImages));
+      saveToDB("sticker_gen_v1", generatedImages);
     }
   }, [generatedImages, isClient]);
 
   useEffect(() => {
     if (isClient) {
-      localStorage.setItem("sticker_manual_v1", JSON.stringify(manualImages));
+      saveToDB("sticker_manual_v1", manualImages);
     }
   }, [manualImages, isClient]);
 
