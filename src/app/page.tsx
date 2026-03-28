@@ -1160,7 +1160,7 @@ export default function Home() {
           <div className="inline-flex bg-white/5 border border-white/10 p-0.5 md:p-1 rounded-2xl backdrop-blur-md">
              <button 
                onClick={() => { setActiveTab("generator"); setStudioTarget(null); setPreviewImage(null); }} 
-               disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+               disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
                className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Zap className="w-3.5 h-3.5 md:w-4 h-4" /> 
@@ -1169,7 +1169,7 @@ export default function Home() {
              </button>
              <button 
                onClick={() => { setActiveTab("manual"); setStudioTarget(null); setPreviewImage(null); }} 
-               disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+               disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
                className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Upload className="w-3.5 h-3.5 md:w-4 h-4" /> 
@@ -1178,7 +1178,7 @@ export default function Home() {
              </button>
              <button 
                onClick={() => { setActiveTab("vector"); setStudioTarget(null); setPreviewImage(null); setIsVectorWarningOpen(true); }} 
-               disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+               disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
                className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "vector" ? "bg-emerald-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Shapes className="w-3.5 h-3.5 md:w-4 h-4" /> 
@@ -1194,7 +1194,7 @@ export default function Home() {
             <div className="flex bg-black/40 rounded-xl p-0.5">
               <button
                 onClick={() => setRembgModel('standard')}
-                disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+                disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
                 title="Standard Mode (Rapi)"
                 className={clsx(
                   "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center",
@@ -1205,7 +1205,7 @@ export default function Home() {
               </button>
               <button
                 onClick={() => setRembgModel('smart')}
-                disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+                disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
                 title="Smart Mode (Detail)"
                 className={clsx(
                   "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center",
