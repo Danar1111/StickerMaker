@@ -1923,6 +1923,13 @@ export default function Home() {
                         type="password" 
                         value={vectorPinInput}
                         onChange={(e) => setVectorPinInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && vectorPinInput === VECTOR_PIN) {
+                            setIsVectorAuthenticated(true);
+                            setIsVectorWarningOpen(false);
+                            setVectorPinInput("");
+                          }
+                        }}
                         placeholder="ENTER ACCESS PIN..." 
                         className="w-full py-4 pl-12 pr-4 bg-white/5 border border-white/10 rounded-2xl text-center font-black tracking-[0.5em] text-emerald-400 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all"
                       />
