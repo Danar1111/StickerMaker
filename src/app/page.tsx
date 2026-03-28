@@ -542,6 +542,36 @@ export default function Home() {
     }, 1000);
   };
 
+  // --- STORAGE HELPERS ---
+  const saveFileLocally = async (url: string, category: 'gen' | 'manual' | 'vector', oldPath?: string) => {
+    try {
+      const res = await fetch('/api/storage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
+        body: JSON.stringify({ imageUrl: url, category, deleteOldPath: oldPath }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Storage failed");
+      return data.localUrl;
+    } catch (err) {
+      console.error("Local storage error:", err);
+      return url; // Fallback to remote if local fails
+    }
+  };
+
+  const deleteFileLocally = async (filePath: string) => {
+    if (!filePath || !filePath.startsWith('/outputs/')) return;
+    try {
+      await fetch('/api/storage', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
+        body: JSON.stringify({ filePath }),
+      });
+    } catch (err) {
+      console.error("Delete local file error:", err);
+    }
+  };
+
   // --- GENERATOR LOGIC ---
   const handleGenerate = async () => {
     if (!prompt.trim() || isGenerating) return;
@@ -576,7 +606,11 @@ export default function Home() {
         const bgData = await bgRes.json();
         if (!bgRes.ok) throw new Error(bgData.error);
 
-        const newSticker = { url: bgData.imageUrl };
+        // v12.3: Save to local VPS immediately
+        setProgressText(`Menyimpan ke VPS [${i + 1}/${batchSize}]...`);
+        const localPath = await saveFileLocally(bgData.imageUrl, 'gen');
+
+        const newSticker = { url: localPath };
         setGeneratedImages(prev => [...prev, newSticker]); 
         setProgress(((i + 1) / batchSize) * 100);
         if (i < batchSize - 1) await new Promise(r => setTimeout(r, 10000));
@@ -614,10 +648,14 @@ export default function Home() {
         
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Generation failed");
+
+        // v12.3: Save Vector result to VPS
+        setProgressText(`Storing Vector [${i + 1}/${vectorBatchSize}]...`);
+        const localPath = await saveFileLocally(data.imageUrl, 'vector');
         
         results.push({
           id: Math.random().toString(36).substr(2, 9),
-          url: data.imageUrl,
+          url: localPath,
           timestamp: Date.now(),
           isPro: isVectorPro
         });
@@ -635,17 +673,27 @@ export default function Home() {
     }
   };
 
-  const handleDeleteVector = (id: string) => {
+  const handleDeleteVector = async (id: string) => {
+    const target = vectorImages.find(img => img.id === id);
+    if (target) await deleteFileLocally(target.url);
     setVectorImages(prev => prev.filter(img => img.id !== id));
   };
 
-  const handleClearAllVector = () => {
+  const handleClearAllVector = async () => {
     if (confirm("Hapus semua riwayat Vector Studio?")) {
+      for (const img of vectorImages) {
+        await deleteFileLocally(img.url);
+      }
       setVectorImages([]);
     }
   };
 
-  const handleDeleteAI = (index: number) => {
+  const handleDeleteAI = async (index: number) => {
+    const target = generatedImages[index];
+    if (target) {
+        await deleteFileLocally(target.url);
+        if (target.upscaledUrl) await deleteFileLocally(target.upscaledUrl);
+    }
     setGeneratedImages(prev => prev.filter((_, i) => i !== index));
     if (studioTarget?.tab === 'gen' && studioTarget.idx === index) {
       setStudioTarget(null);
@@ -671,7 +719,13 @@ export default function Home() {
        });
        const data = await res.json();
        if (!res.ok) throw new Error(data.error);
-       newData[index].upscaledUrl = data.imageUrl;
+
+       // v12.3: Save Upscaled result to VPS (replace old if exists)
+       setProgressText(`Storing 4K local copy...`);
+       const localPath = await saveFileLocally(data.imageUrl, 'gen', newData[index].url);
+       
+       newData[index].upscaledUrl = localPath;
+       newData[index].url = localPath; // Auto-promote to new main URL if upscaled
     } catch(err: any) {
        alert(err.message);
     } finally {
@@ -1095,11 +1149,14 @@ export default function Home() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
 
+        // v12.3: Save Manual Tool result to VPS (replace old if exists)
+        const localPath = await saveFileLocally(data.imageUrl, 'manual', type === 'remove_bg' ? target.url : target.upscaledUrl);
+
         if (type === "remove_bg") {
-          newImages[idx].url = data.imageUrl;
+          newImages[idx].url = localPath;
           newImages[idx].isBackgroundRemoved = true;
         }
-        else newImages[idx].upscaledUrl = data.imageUrl;
+        else newImages[idx].upscaledUrl = localPath;
         
         triggerCooldown();
     } catch (err: any) {
@@ -1143,9 +1200,12 @@ export default function Home() {
               });
               const data = await res.json();
               if (res.ok) {
+                // v12.3: Save Batch Rembg to VPS
+                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url);
+
                 setManualImages(prev => {
                   const updated = [...prev];
-                  updated[i].url = data.imageUrl;
+                  updated[i].url = localPath;
                   updated[i].isBackgroundRemoved = true;
                   return updated;
                 });
@@ -1466,7 +1526,19 @@ export default function Home() {
                        {globalUpscaleState === "COOLDOWN" ? `Jeda API (${upscaleCooldownTime}s)` : manualImages.some(m => m.isUpscaling) ? "Memproses..." : "Upscale 4K Massal"}
                     </button>
                  </div>
-                 <button onClick={() => setManualImages([])} disabled={manualImages.length === 0} className="w-full py-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold flex justify-center items-center gap-2">
+                 <button 
+                    onClick={async () => { 
+                      if (confirm("Bersihkan semua daftar manual?")) {
+                        for (const img of manualImages) {
+                          await deleteFileLocally(img.url);
+                          if (img.upscaledUrl) await deleteFileLocally(img.upscaledUrl);
+                        }
+                        setManualImages([]); 
+                      }
+                    }} 
+                    disabled={manualImages.length === 0} 
+                    className="w-full py-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold flex justify-center items-center gap-2"
+                  >
                     <Trash2 className="w-4 h-4" /> Bersihkan Daftar
                  </button>
               </div>
@@ -1547,7 +1619,14 @@ export default function Home() {
                         setStudioMode(initialMode || 'REFINE');
                         setStudioTarget({idx, tab: 'manual'}); 
                       }}
-                      onDelete={(id) => setManualImages(m => m.filter(x => x.id !== id))}
+                      onDelete={async (id) => {
+                        const target = manualImages.find(x => x.id === id);
+                        if (target) {
+                          await deleteFileLocally(target.url);
+                          if (target.upscaledUrl) await deleteFileLocally(target.upscaledUrl);
+                        }
+                        setManualImages(m => m.filter(x => x.id !== id));
+                      }}
                       globalLock={globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating}
                       upscaleCooldownTime={upscaleCooldownTime}
                       isManualBatchProcessing={isManualBatchProcessing}
