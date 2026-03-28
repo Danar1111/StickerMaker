@@ -312,30 +312,33 @@ export default function Home() {
 
   // Real-time Refine Preview Engine (v9.0)
   useEffect(() => {
-    if (studioTarget === null) {
+    if (studioTarget === null || studioMode !== 'REFINE') {
       setRefinedPreviewUrl(null);
-      setCleanupHistory([]);
-      setCleanupRedoStack([]);
-      setStudioMode('REFINE');
-      setShowStudioControls(false);
       return;
     }
     
     setIsRefining(true);
     const timeout = setTimeout(async () => {
       try {
-        if (!imgRef.current) return;
-        const preview = await refineAlpha(imgRef.current, refineAmount);
-        setRefinedPreviewUrl(preview);
+        if (!stableStudioUrl) return;
+        
+        // v11.1.75: Always refine from ORIGINAL to avoid cumulative processing
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = async () => {
+          const preview = await refineAlpha(img, refineAmount);
+          setRefinedPreviewUrl(preview);
+          setIsRefining(false);
+        };
+        img.src = stableStudioUrl;
       } catch (err) {
         console.error("Preview Refine Error:", err);
-      } finally {
         setIsRefining(false);
       }
     }, 200); // 200ms debounce
 
     return () => clearTimeout(timeout);
-  }, [studioTarget, refineAmount, generatedImages, manualImages]);
+  }, [studioTarget, studioMode, refineAmount, stableStudioUrl]);
 
   // Cleanup Canvas Synchronization (v11.1)
   useEffect(() => {
@@ -609,11 +612,19 @@ export default function Home() {
     const { idx, tab } = studioTarget;
     setIsRefining(true);
     try {
-      // Use pre-calculated preview if available and consistent
-      const resultUrl = refinedPreviewUrl || await refineAlpha(
-        imgRef.current!, 
-        refineAmount
-      );
+      // v11.1.75: Always process from original source for absolute accuracy
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      const resultUrl = await new Promise<string>((resolve, reject) => {
+        img.onload = async () => {
+          try {
+            const res = await refineAlpha(img, refineAmount);
+            resolve(res);
+          } catch (e) { reject(e); }
+        };
+        img.onerror = reject;
+        img.src = stableStudioUrl;
+      });
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -1500,7 +1511,7 @@ export default function Home() {
                           <span className="text-xs font-bold text-zinc-400">Ketebalan Kikis</span>
                           <span className="text-xl font-black text-indigo-400">{refineAmount}px</span>
                         </div>
-                        <input type="range" min="1" max="10" value={refineAmount} onChange={(e) => setRefineAmount(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                        <input type="range" min="1" max="50" value={refineAmount} onChange={(e) => setRefineAmount(parseInt(e.target.value))} className="w-full accent-indigo-500" />
                       </div>
                     </div>
                   )}
