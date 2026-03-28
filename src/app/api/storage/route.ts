@@ -57,7 +57,9 @@ export async function POST(req: NextRequest) {
             : deleteOldPath;
 
         if (actualDeletePath.startsWith('/outputs/')) {
-            const oldFileAbsPath = path.join(process.cwd(), 'public', actualDeletePath);
+            // v12.4: Core path normalization (leading slash removal is critical for path.join)
+            const normalizedPath = actualDeletePath.replace(/^\//, '');
+            const oldFileAbsPath = path.join(process.cwd(), 'public', normalizedPath);
             try {
                 await fs.unlink(oldFileAbsPath);
             } catch (e) {
@@ -88,7 +90,9 @@ export async function DELETE(req: NextRequest) {
         return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
       }
   
-      const absPath = path.join(process.cwd(), 'public', filePath);
+      // v12.4: Core path normalization (leading slash removal is critical for path.join)
+      const normalizedPath = filePath.replace(/^\//, '');
+      const absPath = path.join(process.cwd(), 'public', normalizedPath);
       
       try {
         await fs.unlink(absPath);

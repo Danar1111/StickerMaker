@@ -245,6 +245,7 @@ export default function Home() {
     isBackgroundRemoved?: boolean
   }[]>([]);
   const [isManualBatchProcessing, setIsManualBatchProcessing] = useState(false);
+  const [isSyncingToVPS, setIsSyncingToVPS] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isStyleOpen, setIsStyleOpen] = useState(false);
@@ -253,7 +254,7 @@ export default function Home() {
   // v12.2: Global Processing Watchers
   const isAnyGenProcessing = generatedImages.some(img => img.isUpscaling);
   const isAnyManualProcessing = manualImages.some(img => img.isProcessing || img.isUpscaling);
-  const isGloballyLocked = isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE' || isAnyGenProcessing || isAnyManualProcessing;
+  const isGloballyLocked = isGenerating || isManualBatchProcessing || isSyncingToVPS || isVectorGenerating || globalUpscaleState !== 'IDLE' || isAnyGenProcessing || isAnyManualProcessing;
 
   // Studio State (v11.1)
   const [studioTarget, setStudioTarget] = useState<{idx: number, tab: 'gen'|'manual'} | null>(null);
@@ -743,43 +744,52 @@ export default function Home() {
   };
 
   // --- MANUAL BATCH LOGIC ---
-  const processFile = (file: File) => {
+  const processFile = async (file: File): Promise<void> => {
     if (!file || !file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX_DIM = 1024; // Guaranteed safe limit for all Replicate GPU models
-        let w = img.width, h = img.height;
-        if (w > MAX_DIM || h > MAX_DIM) {
-          if (w > h) { h = (h/w)*MAX_DIM; w = MAX_DIM; }
-          else { w = (w/h)*MAX_DIM; h = MAX_DIM; }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL("image/png");
-        
-        // v12.4: Save the original upload to VPS immediately to avoid browser memory bloat
-        setProgressText("Mempersiapkan media...");
-        saveFileLocally(dataUrl, 'manual').then(localUrl => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = async () => {
+          const MAX_DIM = 1024; // Guaranteed safe limit for all Replicate GPU models
+          let w = img.width, h = img.height;
+          if (w > MAX_DIM || h > MAX_DIM) {
+            if (w > h) { h = (h/w)*MAX_DIM; w = MAX_DIM; }
+            else { w = (w/h)*MAX_DIM; h = MAX_DIM; }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/png");
+          
+          // v12.4: Save the original upload to VPS immediately to avoid browser memory bloat
+          const localUrl = await saveFileLocally(dataUrl, 'manual');
           setManualImages(prev => [
             { id: Math.random().toString(36).substr(2, 9), originalUrl: localUrl, url: localUrl, isProcessing: false, isUpscaling: false, isBackgroundRemoved: false },
             ...prev
           ]);
-          setProgressText("");
-        });
+          resolve();
+        };
+        img.src = event.target?.result as string;
       };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    });
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files) {
-      Array.from(files).forEach(processFile);
-      e.target.value = ""; // Reset value to allow identical re-uploads
+    if (files && files.length > 0) {
+      setIsSyncingToVPS(true);
+      setProgressText(`Menyinkronkan ${files.length} file ke VPS...`);
+      try {
+        for (const file of Array.from(files)) {
+          await processFile(file);
+        }
+      } finally {
+        setIsSyncingToVPS(false);
+        setProgressText("");
+        e.target.value = ""; // Reset value to allow identical re-uploads
+      }
     }
   };
 
@@ -1528,11 +1538,32 @@ export default function Home() {
             <div className="glass-panel p-6 rounded-2xl">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2"> <Upload className="w-5 h-5 text-pink-400" /> Manual Upload </h2>
               <div className="space-y-6">
-                 <div onClick={() => fileInputRef.current?.click()} onDragOver={(e) => {e.preventDefault(); setIsDragging(true)}} onDragLeave={() => setIsDragging(false)} onDrop={(e) => {e.preventDefault(); setIsDragging(false); if(e.dataTransfer.files) Array.from(e.dataTransfer.files).forEach(processFile)}} className={clsx("border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all", isDragging ? "border-pink-500 bg-pink-500/10" : "border-white/10")}>
+                  <div 
+                    onClick={() => fileInputRef.current?.click()} 
+                    onDragOver={(e) => {e.preventDefault(); setIsDragging(true)}} 
+                    onDragLeave={() => setIsDragging(false)} 
+                    onDrop={async (e) => {
+                      e.preventDefault(); 
+                      setIsDragging(false); 
+                      if(e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        setIsSyncingToVPS(true);
+                        setProgressText(`Menyinkronkan ${e.dataTransfer.files.length} file ke VPS...`);
+                        try {
+                          for (const file of Array.from(e.dataTransfer.files)) {
+                            await processFile(file);
+                          }
+                        } finally {
+                          setIsSyncingToVPS(false);
+                          setProgressText("");
+                        }
+                      }
+                    }} 
+                    className={clsx("border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all", isDragging ? "border-pink-500 bg-pink-500/10" : "border-white/10")}
+                  >
                     <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
                     <Upload className="w-8 h-8 text-zinc-500" />
                     <p className="text-zinc-500 text-[10px] text-center">Seret banyak file ke sini atau klik untuk memilih.</p>
-                 </div>
+                  </div>
 
                  <div className="flex flex-col gap-3">
                     <button 
@@ -1660,6 +1691,17 @@ export default function Home() {
                     />
                   </div>
                 ))
+              )}
+              {activeTab === "manual" && isSyncingToVPS && (
+                <div className="flex flex-col items-center justify-center p-8 bg-white/5 border border-dashed border-white/20 rounded-2xl gap-3 animate-pulse">
+                  <div className="w-12 h-12 bg-indigo-500/20 rounded-full flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-bold text-white mb-1">Menyinkronkan Image...</p>
+                    <p className="text-[10px] text-zinc-500">Mohon tunggu, sedang memproses ke VPS.</p>
+                  </div>
+                </div>
               )}
             </div>
             {((activeTab === "generator" ? generatedImages.length : activeTab === "manual" ? manualImages.length : vectorImages.length) === 0) && (
