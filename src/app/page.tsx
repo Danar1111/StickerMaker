@@ -1182,14 +1182,16 @@ export default function Home() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
 
-        // v12.3: Save Manual Tool result to VPS (replace old if exists)
-        const localPath = await saveFileLocally(data.imageUrl, 'manual', type === 'remove_bg' ? target.url : target.upscaledUrl);
+        // v12.4: Core replacement logic - upscale replaces the current active image (url)
+        const localPath = await saveFileLocally(data.imageUrl, 'manual', type === 'remove_bg' ? target.url : (target.upscaledUrl || target.url));
 
         if (type === "remove_bg") {
           newImages[idx].url = localPath;
           newImages[idx].isBackgroundRemoved = true;
+        } else {
+          newImages[idx].url = localPath; // Sync active url to upscale result
+          newImages[idx].upscaledUrl = localPath;
         }
-        else newImages[idx].upscaledUrl = localPath;
         
         triggerCooldown();
     } catch (err: any) {
@@ -1233,7 +1235,7 @@ export default function Home() {
               });
               const data = await res.json();
               if (res.ok) {
-                // v12.3: Save Batch Rembg to VPS
+                // v12.4: Save Batch Rembg to VPS
                 const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url);
 
                 setManualImages(prev => {
@@ -1255,15 +1257,16 @@ export default function Home() {
               });
               const data = await res.json();
               if (res.ok) {
-                 // v12.4: Save Batch Upscale to VPS
-                 const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl);
+                // v12.4: Core replacement logic - upscale replaces current image in batch mode
+                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl || img.url);
 
-                 setManualImages(prev => {
-                   const updated = [...prev];
-                   updated[i].upscaledUrl = localPath;
-                   return updated;
-                 });
-                 if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
+                setManualImages(prev => {
+                  const updated = [...prev];
+                  updated[i].url = localPath; // Sync active url to upscale result
+                  updated[i].upscaledUrl = localPath;
+                  return updated;
+                });
+                if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
               }
            }
         }
