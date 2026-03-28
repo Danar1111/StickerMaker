@@ -9,7 +9,7 @@ const validatePin = (req: NextRequest) => {
   return pin === PIN_CONFIG;
 };
 
-// POST: Save an external image to local directory
+// POST: Save an image and optionally delete a legacy version
 export async function POST(req: NextRequest) {
   if (!validatePin(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing imageUrl or category" }, { status: 400 });
     }
 
-    // 1. Get the image data (Handle both URL and Base64)
+    // 1. Get the image data
     let imageBuffer: Buffer;
     if (imageUrl.startsWith('data:image/')) {
       const base64Data = imageUrl.split(',')[1];
@@ -43,13 +43,14 @@ export async function POST(req: NextRequest) {
     const targetDir = path.join(process.cwd(), 'public', 'outputs', category);
     const targetPath = path.join(targetDir, filename);
 
-    // Ensure directory exists (extra safety)
+    // Ensure directory exists
     await fs.mkdir(targetDir, { recursive: true });
 
     // 3. Save to disk
     await fs.writeFile(targetPath, imageBuffer);
 
-    // 4. Delete old file if provided (for replacements)
+    // 4. Delete old file if provided (with Dual Path Deletion)
+    const debugLogs: string[] = [];
     if (deleteOldPath) {
         // Strip proxy prefix if present
         const actualDeletePath = deleteOldPath.includes('/api/storage/view') 
@@ -57,14 +58,42 @@ export async function POST(req: NextRequest) {
             : deleteOldPath;
 
         if (actualDeletePath.startsWith('/outputs/')) {
-            // v12.4: Core path normalization (leading slash removal is critical for path.join)
-            const normalizedPath = actualDeletePath.replace(/^\//, '');
+            // Aggressive normalization for Linux/VPS paths
+            const normalizedPath = actualDeletePath.replace(/^\/+/, ''); // Remove all leading slashes
             const oldFileAbsPath = path.join(process.cwd(), 'public', normalizedPath);
+            const altFileAbsPath = path.resolve('./public', normalizedPath);
+            
+            debugLogs.push(`[STORAGE] Deleting: ${oldFileAbsPath}`);
+
             try {
-                await fs.unlink(oldFileAbsPath);
-            } catch (e) {
-                console.warn(`Failed to delete old file: ${actualDeletePath}`, e);
+                let exists = await fs.access(oldFileAbsPath).then(() => true).catch(() => false);
+                let targetDelete = oldFileAbsPath;
+
+                if (!exists) {
+                    exists = await fs.access(altFileAbsPath).then(() => true).catch(() => false);
+                    targetDelete = altFileAbsPath;
+                }
+
+                if (exists) {
+                    await fs.unlink(targetDelete);
+                    debugLogs.push(`[STORAGE] SUCCESS: Deleted old file at ${targetDelete}`);
+                } else {
+                    debugLogs.push(`[STORAGE] SKIP: File Not Found at ${oldFileAbsPath} or ${altFileAbsPath}`);
+                }
+            } catch (e: any) {
+                const errMsg = `[STORAGE] FAILED: ${e.code} - ${e.message}`;
+                debugLogs.push(errMsg);
+                console.error(errMsg);
             }
+
+            // Write to persistent debug log for AI monitoring
+            const logEntry = `[${new Date().toISOString()}] Action: SAVE, New: ${filename}, Deleting: ${actualDeletePath}, Status: ${debugLogs.join(' | ')}\n`;
+            await fs.appendFile(path.join(process.cwd(), 'public', 'storage-debug.txt'), logEntry).catch(() => {});
+
+            return NextResponse.json({ 
+                localUrl: `/outputs/${category}/${filename}`, 
+                debug: debugLogs 
+            });
         }
     }
 
@@ -72,12 +101,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ localUrl });
 
   } catch (error: any) {
-    console.error("Storage API Error:", error);
+    console.error("Storage API POST Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// DELETE: Remove a physical file from VPS
+// DELETE: Explicitly remove a physical file
 export async function DELETE(req: NextRequest) {
     if (!validatePin(req)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -90,22 +119,32 @@ export async function DELETE(req: NextRequest) {
         return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
       }
   
-      // v12.4: Core path normalization (leading slash removal is critical for path.join)
-      const normalizedPath = filePath.replace(/^\//, '');
+      // Aggressive normalization and Dual Path Deletion
+      const normalizedPath = filePath.replace(/^\/+/, ''); 
       const absPath = path.join(process.cwd(), 'public', normalizedPath);
-      
-      try {
-        await fs.unlink(absPath);
-        return NextResponse.json({ success: true });
-      } catch (e: any) {
-        if (e.code === 'ENOENT') {
-            return NextResponse.json({ success: true, message: "File already gone" });
-        }
-        throw e;
-      }
+      const altPath = path.resolve('./public', normalizedPath);
   
+      try {
+        let exists = await fs.access(absPath).then(() => true).catch(() => false);
+        let targetDelete = absPath;
+
+        if (!exists) {
+            exists = await fs.access(altPath).then(() => true).catch(() => false);
+            targetDelete = altPath;
+        }
+
+        if (exists) {
+          await fs.unlink(targetDelete);
+          return NextResponse.json({ success: true, deleted: targetDelete });
+        } else {
+          return NextResponse.json({ success: true, message: "File not found locally, skipping" });
+        }
+      } catch (err: any) {
+        console.error("FS Unlink Error:", err);
+        return NextResponse.json({ error: err.message }, { status: 500 });
+      }
     } catch (error: any) {
-      console.error("Storage API DELETE Error:", error);
+      console.error("Storage DELETE API Error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }

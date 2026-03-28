@@ -546,17 +546,25 @@ export default function Home() {
   // --- STORAGE HELPERS ---
   const saveFileLocally = async (url: string, category: 'gen' | 'manual' | 'vector', oldPath?: string) => {
     try {
+      console.log(`[STORAGE-UI] Calling saveFileLocally:`, { category, oldPath });
       const res = await fetch('/api/storage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
         body: JSON.stringify({ imageUrl: url, category, deleteOldPath: oldPath }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Storage failed");
+      console.log(`[STORAGE-UI] saveFileLocally result:`, data);
+      if (data.debug) {
+        data.debug.forEach((log: string) => console.log(`[STORAGE-DEBUG] ${log}`));
+      }
       return `/api/storage/view${data.localUrl}`;
     } catch (err) {
       console.error("Local storage error:", err);
-      return url; // Fallback to remote if local fails
+      // v12.5: Visual feedback for storage failures
+      if (url.startsWith('blob:')) {
+          console.warn("[STORAGE] Saving failed, keeping blob URL temporarily.");
+      }
+      return url; 
     }
   };
 
@@ -570,6 +578,7 @@ export default function Home() {
     if (!actualPath || !actualPath.startsWith('/outputs/')) return;
     
     try {
+      console.log(`[STORAGE-UI] Calling deleteFileLocally:`, { actualPath });
       await fetch('/api/storage', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
@@ -2318,7 +2327,7 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
   onUpscale: () => void,
   onPreview: () => void,
   onRefine: (initialMode?: 'REFINE' | 'CLEANUP' | 'CROP') => void,
-  onDelete: () => void,
+  onDelete: (id: string) => void,
   globalLock: boolean,
   upscaleCooldownTime: number
 }) {
@@ -2420,7 +2429,7 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
         <div className="grid grid-cols-3 w-full gap-2 border-t border-white/10 pt-3 mt-1">
           <button onClick={(e) => { e.stopPropagation(); onPreview(); }} className="py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="View"><Maximize className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">PREVIEW</span></button>
           <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, "sticker.png"); }} className="py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Save"><Download className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline text-white">SAVE</span></button>
-          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg flex flex-col items-center justify-center transition-colors px-1 border border-red-500/20" title="Hapus"><Trash2 className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">HAPUS</span></button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(img.id || img.url); }} className="py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg flex flex-col items-center justify-center transition-colors px-1 border border-red-500/20" title="Hapus"><Trash2 className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">HAPUS</span></button>
         </div>
       </div>
     </div>
