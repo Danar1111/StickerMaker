@@ -369,13 +369,20 @@ export default function Home() {
   // Workspace Keyboard & Zoom Controllers
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // v12.2: Safety check - ignore shortcuts if user is typing in ANY input
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
       if (studioMode !== 'CLEANUP') return;
       
       const isZ = e.key.toLowerCase() === 'z';
       const isY = e.key.toLowerCase() === 'y';
       const isCtrl = e.ctrlKey || e.metaKey;
 
-      if (e.code === 'Space') {
+      // v12.2: Only intercept Space if Studio is actually OPEN
+      if (e.code === 'Space' && studioTarget !== null) {
           setIsSpacePressed(true);
           e.preventDefault();
       }
@@ -400,7 +407,7 @@ export default function Home() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [studioMode, cleanupHistory, cleanupRedoStack]);
+  }, [studioMode, studioTarget, cleanupHistory, cleanupRedoStack]);
 
   const handleWheel = (e: React.WheelEvent) => {
     if (studioMode !== 'CLEANUP') return;
