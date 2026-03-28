@@ -34,7 +34,33 @@ function httpsRequest(url: string, options: { method?: string; headers?: Record<
     });
 }
 
+/**
+ * Mengambil gambar dari URL dan mengubahnya menjadi base64 secara aman.
+ * Ini mencegah error 404 dari Replicate Delivery jika URL asli sudah dihapus.
+ */
+async function fetchImageAsBase64(url: string): Promise<string> {
+    if (url.startsWith('data:')) return url; // Sudah base64
+    
+    return new Promise((resolve, reject) => {
+        https.get(url, (res) => {
+            if (res.statusCode !== 200) {
+                return reject(new Error(`Gagal mengambil gambar (HTTP ${res.statusCode})`));
+            }
+            const data: Buffer[] = [];
+            res.on('data', (chunk) => data.push(chunk));
+            res.on('end', () => {
+                const buffer = Buffer.concat(data);
+                const base64 = buffer.toString('base64');
+                const contentType = res.headers['content-type'] || 'image/png';
+                resolve(`data:${contentType};base64,${base64}`);
+            });
+        }).on('error', reject);
+    });
+}
+
+
 async function runReplicateModel(owner: string, name: string, input: any, token: string) {
+    console.log(`[Replicate] Starting named model: ${owner}/${name}`);
     const { status, data: initData } = await httpsRequest(
         `https://api.replicate.com/v1/models/${owner}/${name}/predictions`,
         {
@@ -46,22 +72,29 @@ async function runReplicateModel(owner: string, name: string, input: any, token:
             body: JSON.stringify({ input })
         }
     );
-    if (initData.error) throw new Error(initData.error);
+    
+    // v12.2 Enhanced Error Check
+    if (status >= 400 || !initData || !initData.urls) {
+        const errMsg = initData?.detail || initData?.error || (typeof initData === 'string' ? initData : JSON.stringify(initData));
+        console.error(`[Replicate] Failed to start model ${owner}/${name}:`, initData);
+        throw new Error(`Replicate Error (${status}): ${errMsg}`);
+    }
     
     let predictionUrl = initData.urls.get;
-    console.log(`[Replicate] Start Model: ${owner}/${name}, Status: ${status}`);
+    console.log(`[Replicate] Model started. Status: ${status}, Prediction ID: ${initData.id}`);
     
     while (true) {
         const { data: pollData } = await httpsRequest(predictionUrl, {
             headers: { "Authorization": `Token ${token}` }
         });
         if (pollData.status === "succeeded") return pollData.output;
-        if (pollData.status === "failed") throw new Error(pollData.error || "Replicate prediction failed");
+        if (pollData.status === "failed") throw new Error(pollData.error || pollData.detail || "Replicate prediction failed");
         await new Promise(r => setTimeout(r, 1500));
     }
 }
 
 async function runReplicate(version: string, input: any, token: string) {
+    console.log(`[Replicate] Starting version-based prediction: ${version.substring(0,8)}...`);
     const { status, data: initData } = await httpsRequest(
         "https://api.replicate.com/v1/predictions",
         {
@@ -73,17 +106,22 @@ async function runReplicate(version: string, input: any, token: string) {
             body: JSON.stringify({ version, input })
         }
     );
-    if (initData.error) throw new Error(initData.error);
+
+    if (status >= 400 || !initData || !initData.urls) {
+        const errMsg = initData?.detail || initData?.error || (typeof initData === 'string' ? initData : JSON.stringify(initData));
+        console.error(`[Replicate] Failed to start version ${version.substring(0,8)}...:`, initData);
+        throw new Error(`Replicate Error (${status}): ${errMsg}`);
+    }
     
     let predictionUrl = initData.urls.get;
-    console.log(`[Replicate] Start Version: ${version.substring(0,8)}..., Status: ${status}`);
+    console.log(`[Replicate] Version prediction started. Status: ${status}, Prediction ID: ${initData.id}`);
     
     while (true) {
         const { data: pollData } = await httpsRequest(predictionUrl, {
             headers: { "Authorization": `Token ${token}` }
         });
         if (pollData.status === "succeeded") return pollData.output;
-        if (pollData.status === "failed") throw new Error(pollData.error || "Replicate prediction failed");
+        if (pollData.status === "failed") throw new Error(pollData.error || pollData.detail || "Replicate prediction failed");
         await new Promise(r => setTimeout(r, 1500));
     }
 }
@@ -175,6 +213,16 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             const payloadSize = imageUrl ? Math.round(imageUrl.length / 1024) : 0;
             console.log(`[API] Action: remove_bg, Model: ${rembgModel}, Payload Size: ${payloadSize} KB`);
             
+            // v12.2: Ensure source is fetched locally to avoid 404 delivery errors
+            let finalImageSource = imageUrl;
+            if (imageUrl.includes('replicate.delivery')) {
+                try {
+                    finalImageSource = await fetchImageAsBase64(imageUrl);
+                } catch (e) {
+                    console.warn("[API] Failsafe: could not fetch as base64, using original URL");
+                }
+            }
+
             // Standard (Original) vs Smart (InSPyReNet)
             const rembgModelVersion = rembgModel === 'smart' 
                 ? "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc"
@@ -182,7 +230,7 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
 
             const transparentImageUrl = await runReplicate(
                 rembgModelVersion,
-                { image: imageUrl },
+                { image: finalImageSource },
                 replicateToken
             );
             return NextResponse.json({ imageUrl: transparentImageUrl });
@@ -212,6 +260,29 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
 
             // Replicate returns a URI string for these models
             return NextResponse.json({ imageUrl: output });
+        }
+
+        else if (action === "upscale") {
+            console.log(`[API] Action: upscale, URL: ${imageUrl?.substring(0, 50)}...`);
+            
+            // v12.2: Ensure source is fetched locally to avoid 404 delivery errors
+            let finalImageSource = imageUrl;
+            if (imageUrl.includes('replicate.delivery')) {
+                try {
+                    finalImageSource = await fetchImageAsBase64(imageUrl);
+                } catch (e) {
+                    console.warn("[API] Failsafe: could not fetch as base64, using original URL");
+                }
+            }
+
+            // v12.2: Corrected identifier 'nightmareai' (no hyphen) and latest stable hash
+            const upscaledUrl = await runReplicateModel(
+                "nightmareai",
+                "real-esrgan",
+                { image: finalImageSource, scale: 4, face_enhance: false },
+                replicateToken
+            );
+            return NextResponse.json({ imageUrl: upscaledUrl });
         }
 
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });

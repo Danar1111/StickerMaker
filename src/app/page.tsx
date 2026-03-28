@@ -250,6 +250,11 @@ export default function Home() {
   const [isStyleOpen, setIsStyleOpen] = useState(false);
   const styleDropdownRef = useRef<HTMLDivElement>(null);
 
+  // v12.2: Global Processing Watchers
+  const isAnyGenProcessing = generatedImages.some(img => img.isUpscaling);
+  const isAnyManualProcessing = manualImages.some(img => img.isProcessing || img.isUpscaling);
+  const isGloballyLocked = isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE' || isAnyGenProcessing || isAnyManualProcessing;
+
   // Studio State (v11.1)
   const [studioTarget, setStudioTarget] = useState<{idx: number, tab: 'gen'|'manual'} | null>(null);
   const [refineAmount, setRefineAmount] = useState(2);
@@ -1251,7 +1256,7 @@ export default function Home() {
           <div className="inline-flex bg-white/5 border border-white/10 p-0.5 md:p-1 rounded-2xl backdrop-blur-md">
              <button 
                onClick={() => { setActiveTab("generator"); setStudioTarget(null); setPreviewImage(null); }} 
-               disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
+               disabled={isGloballyLocked}
                className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Zap className="w-3.5 h-3.5 md:w-4 h-4" /> 
@@ -1260,7 +1265,7 @@ export default function Home() {
              </button>
              <button 
                onClick={() => { setActiveTab("manual"); setStudioTarget(null); setPreviewImage(null); }} 
-               disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
+               disabled={isGloballyLocked}
                className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Upload className="w-3.5 h-3.5 md:w-4 h-4" /> 
@@ -1269,7 +1274,7 @@ export default function Home() {
              </button>
              <button 
                onClick={() => { setActiveTab("vector"); setStudioTarget(null); setPreviewImage(null); setIsVectorWarningOpen(true); }} 
-               disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
+               disabled={isGloballyLocked}
                className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "vector" ? "bg-emerald-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Shapes className="w-3.5 h-3.5 md:w-4 h-4" /> 
@@ -1285,7 +1290,7 @@ export default function Home() {
             <div className="flex bg-black/40 rounded-xl p-0.5">
               <button
                 onClick={() => setRembgModel('standard')}
-                disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
+                disabled={isGloballyLocked}
                 title="Standard Mode (Rapi)"
                 className={clsx(
                   "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed",
@@ -1296,7 +1301,7 @@ export default function Home() {
               </button>
               <button
                 onClick={() => setRembgModel('smart')}
-                disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
+                disabled={isGloballyLocked}
                 title="Smart Mode (Detail)"
                 className={clsx(
                   "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed",
@@ -1367,7 +1372,7 @@ export default function Home() {
                   <div className="space-y-2"> {MODES.map(m => <button key={m.id} onClick={() => setMode(m.id)} className={clsx("w-full p-3 rounded-xl border flex items-center gap-3 transition-colors", mode === m.id ? "border-pink-500 bg-pink-500/10" : "border-white/10 hover:bg-white/5")}> <m.icon className="w-5 h-5 text-indigo-400" /> <div className="text-left"><div className="text-sm font-bold">{m.name}</div><div className="text-[10px] text-zinc-500 leading-tight">{m.desc}</div></div> </button>)} </div>
                 </div>
 
-                 <button onClick={handleGenerate} disabled={isGenerating || !prompt.trim()} className="w-full py-4 rounded-xl bg-indigo-500 text-white font-bold disabled:opacity-50"> {isGenerating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Generate Batch"} </button>
+                 <button onClick={handleGenerate} disabled={isGloballyLocked || !prompt.trim()} className="w-full py-4 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-bold transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"> {isGenerating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Generate Batch"} </button>
               </div>
             </div>
           ) : activeTab === "vector" ? (
@@ -1417,9 +1422,13 @@ export default function Home() {
                     </div>
                  </div>
 
-                 <button onClick={handleGenerateVector} disabled={isVectorGenerating || !vectorPrompt.trim()} className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold disabled:opacity-50 shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"> 
-                    {isVectorGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Zap className="w-4 h-4" /> Generate Vector Assets</>}
-                 </button>
+                 <button 
+                    onClick={handleGenerateVector} 
+                    disabled={isGloballyLocked || !vectorPrompt.trim()} 
+                    className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                  > 
+                     {isVectorGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Zap className="w-4 h-4" /> Generate Vector Assets</>}
+                  </button>
                </div>
              </div>
           ) : (
@@ -1435,16 +1444,16 @@ export default function Home() {
                  <div className="flex flex-col gap-3">
                     <button 
                       onClick={() => handleBatchManual("remove_bg")} 
-                      disabled={manualImages.length === 0 || isManualBatchProcessing || globalUpscaleState !== "IDLE" || isGenerating} 
-                      className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-bold disabled:opacity-50 flex justify-center items-center gap-2 border border-white/10"
+                      disabled={manualImages.length === 0 || isGloballyLocked} 
+                      className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex justify-center items-center gap-2 border border-white/10"
                     >
                        {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5 text-indigo-400" />}
                        {globalUpscaleState === "COOLDOWN" ? `Tunggu (${upscaleCooldownTime}s)` : manualImages.some(m => m.isProcessing) ? "Memproses..." : "Hapus BG Massal"}
                     </button>
                     <button 
                       onClick={() => handleBatchManual("upscale")} 
-                      disabled={manualImages.length === 0 || isManualBatchProcessing || globalUpscaleState !== "IDLE" || isGenerating} 
-                      className="w-full py-4 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-xl font-bold disabled:opacity-50 flex justify-center items-center gap-2 shadow-lg shadow-pink-500/10"
+                      disabled={manualImages.length === 0 || isGloballyLocked} 
+                      className="w-full py-4 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex justify-center items-center gap-2 shadow-lg shadow-pink-500/10"
                     >
                        {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
                        {globalUpscaleState === "COOLDOWN" ? `Jeda API (${upscaleCooldownTime}s)` : manualImages.some(m => m.isUpscaling) ? "Memproses..." : "Upscale 4K Massal"}
