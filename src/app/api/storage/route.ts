@@ -22,13 +22,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing imageUrl or category" }, { status: 400 });
     }
 
-    // 1. Download the image
-    const response = await fetch(imageUrl);
-    if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
-    const buffer = await response.arrayBuffer();
+    // 1. Get the image data (Handle both URL and Base64)
+    let imageBuffer: Buffer;
+    if (imageUrl.startsWith('data:image/')) {
+      const base64Data = imageUrl.split(',')[1];
+      imageBuffer = Buffer.from(base64Data, 'base64');
+    } else {
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+      const arrayBuffer = await response.arrayBuffer();
+      imageBuffer = Buffer.from(arrayBuffer);
+    }
 
     // 2. Generate unique filename
-    const ext = imageUrl.split('.').pop()?.split('?')[0] || 'png';
+    let ext = 'png';
+    if (!imageUrl.startsWith('data:image/')) {
+        ext = imageUrl.split('.').pop()?.split('?')[0] || 'png';
+    }
     const filename = `${category}_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
     const targetDir = path.join(process.cwd(), 'public', 'outputs', category);
     const targetPath = path.join(targetDir, filename);
@@ -37,7 +47,7 @@ export async function POST(req: NextRequest) {
     await fs.mkdir(targetDir, { recursive: true });
 
     // 3. Save to disk
-    await fs.writeFile(targetPath, Buffer.from(buffer));
+    await fs.writeFile(targetPath, imageBuffer);
 
     // 4. Delete old file if provided (for replacements)
     if (deleteOldPath && deleteOldPath.startsWith('/outputs/')) {

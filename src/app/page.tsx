@@ -552,7 +552,7 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Storage failed");
-      return data.localUrl;
+      return `/api/storage/view${data.localUrl}`;
     } catch (err) {
       console.error("Local storage error:", err);
       return url; // Fallback to remote if local fails
@@ -560,12 +560,19 @@ export default function Home() {
   };
 
   const deleteFileLocally = async (filePath: string) => {
-    if (!filePath || !filePath.startsWith('/outputs/')) return;
+    if (!filePath) return;
+    // Extract the actual path if it contains the view proxy
+    const actualPath = filePath.includes('/api/storage/view') 
+      ? filePath.split('/api/storage/view')[1] 
+      : filePath;
+
+    if (!actualPath || !actualPath.startsWith('/outputs/')) return;
+    
     try {
       await fetch('/api/storage', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
-        body: JSON.stringify({ filePath }),
+        body: JSON.stringify({ filePath: actualPath }),
       });
     } catch (err) {
       console.error("Delete local file error:", err);
@@ -753,10 +760,15 @@ export default function Home() {
         canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
         const dataUrl = canvas.toDataURL("image/png");
         
-        setManualImages(prev => [
-          ...prev, 
-          { id: Math.random().toString(36).substr(2, 9), originalUrl: dataUrl, url: dataUrl, isProcessing: false, isUpscaling: false, isBackgroundRemoved: false }
-        ]);
+        // v12.4: Save the original upload to VPS immediately to avoid browser memory bloat
+        setProgressText("Mempersiapkan media...");
+        saveFileLocally(dataUrl, 'manual').then(localUrl => {
+          setManualImages(prev => [
+            { id: Math.random().toString(36).substr(2, 9), originalUrl: localUrl, url: localUrl, isProcessing: false, isUpscaling: false, isBackgroundRemoved: false },
+            ...prev
+          ]);
+          setProgressText("");
+        });
       };
       img.src = event.target?.result as string;
     };
@@ -806,13 +818,16 @@ export default function Home() {
         scaledPixelCrop
       );
       
+      // v12.4: Save Studio result to VPS and clean up old file
+      const localUrl = await saveFileLocally(croppedImage, tab === 'gen' ? 'gen' : 'manual', target.url);
+      
       if (tab === 'gen') {
         setGeneratedImages(prev => {
           const newImages = [...prev];
           if (!newImages[idx]) return prev;
           newImages[idx] = {
             ...newImages[idx],
-            url: croppedImage,
+            url: localUrl,
             upscaledUrl: undefined
           };
           return newImages;
@@ -824,8 +839,8 @@ export default function Home() {
           newImages[idx] = {
             ...newImages[idx],
             id: Math.random().toString(36).substr(2, 9), 
-            url: croppedImage,
-            originalUrl: croppedImage,
+            url: localUrl,
+            originalUrl: localUrl,
             upscaledUrl: undefined,
             isBackgroundRemoved: newImages[idx].isBackgroundRemoved
           };
@@ -848,6 +863,10 @@ export default function Home() {
     setIsCleaning(true);
     try {
       const resultUrl = cleanupCanvasRef.current.toDataURL("image/png");
+      const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
+      
+      // v12.4: Save Cleanup result to VPS and clean up old file
+      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url);
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -855,7 +874,7 @@ export default function Home() {
           if (!newImages[idx]) return prev;
           newImages[idx] = { 
             ...newImages[idx], 
-            url: resultUrl, 
+            url: localUrl, 
             upscaledUrl: undefined 
           };
           return newImages;
@@ -866,8 +885,8 @@ export default function Home() {
           if (!newImages[idx]) return prev;
           newImages[idx] = { 
             ...newImages[idx], 
-            url: resultUrl, 
-            originalUrl: resultUrl, 
+            url: localUrl, 
+            originalUrl: localUrl, 
             upscaledUrl: undefined,
             isBackgroundRemoved: true
           };
@@ -905,13 +924,17 @@ export default function Home() {
         img.src = stableStudioUrl;
       });
       
+      const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
+      // v12.4: Save Refinement result to VPS and clean up old file
+      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url);
+      
       if (tab === 'gen') {
         setGeneratedImages(prev => {
           const newImages = [...prev];
           if (!newImages[idx]) return prev;
           newImages[idx] = { 
             ...newImages[idx], 
-            url: resultUrl, 
+            url: localUrl, 
             upscaledUrl: undefined 
           };
           return newImages;
@@ -923,8 +946,8 @@ export default function Home() {
           newImages[idx] = { 
             ...newImages[idx], 
             id: Math.random().toString(36).substr(2, 9), 
-            url: resultUrl, 
-            originalUrl: resultUrl, 
+            url: localUrl, 
+            originalUrl: localUrl, 
             upscaledUrl: undefined,
             isBackgroundRemoved: newImages[idx].isBackgroundRemoved
           };
@@ -1222,9 +1245,12 @@ export default function Home() {
               });
               const data = await res.json();
               if (res.ok) {
+                 // v12.4: Save Batch Upscale to VPS
+                 const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl);
+
                  setManualImages(prev => {
                    const updated = [...prev];
-                   updated[i].upscaledUrl = data.imageUrl;
+                   updated[i].upscaledUrl = localPath;
                    return updated;
                  });
                  if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
