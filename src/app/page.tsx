@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { 
   Wand2, 
   Image as ImageIcon, 
@@ -51,53 +51,39 @@ const STYLES = [
   "Claymation / Plasticine", "Graffiti Street Art"
 ];
 
-// Helper to create image from URL
-const createImage = (url: string): Promise<HTMLImageElement> =>
-  new Promise((resolve, reject) => {
-    const image = new Image();
-    image.addEventListener('load', () => resolve(image));
-    image.addEventListener('error', (error) => reject(error));
-    image.setAttribute('crossOrigin', 'anonymous');
-    image.src = url;
-  });
 
 // Helper to get cropped image as data URL
-async function getCroppedImg(imageSrc: string, crop: Crop): Promise<string> {
-    const image = await createImage(imageSrc);
+async function getCroppedImg(image: HTMLImageElement, pixelCrop: PixelCrop): Promise<string> {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
     if (!ctx) return "";
 
-    // v7.12: Percentage Precision Engine - No more rendered-pixel scaling
-    // Percentages (0-100) are mapped directly to natural dimensions
-    const scaleX = image.naturalWidth / 100;
-    const scaleY = image.naturalHeight / 100;
+    // Set canvas dimensions to requested pixel size
+    canvas.width = pixelCrop.width;
+    canvas.height = pixelCrop.height;
 
-    canvas.width = crop.width! * scaleX;
-    canvas.height = crop.height! * scaleY;
-
+    // v11.1: Pixel-Perfect Sampling
     ctx.drawImage(
       image,
-      crop.x! * scaleX,
-      crop.y! * scaleY,
-      crop.width! * scaleX,
-      crop.height! * scaleY,
+      pixelCrop.x,
+      pixelCrop.y,
+      pixelCrop.width,
+      pixelCrop.height,
       0,
       0,
-      crop.width! * scaleX,
-      crop.height! * scaleY
+      pixelCrop.width,
+      pixelCrop.height
     );
 
     return canvas.toDataURL('image/png');
 }
 
 // v9.7: Ultimate Matte Fixed Engine (Gaussian Thresholding)
-async function refineAlpha(imageSrc: string, amount: number): Promise<string> {
-  const image = await createImage(imageSrc);
+async function refineAlpha(image: HTMLImageElement, amount: number): Promise<string> {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  if (!ctx || amount <= 0) return imageSrc;
+  if (!ctx || amount <= 0) return image.src;
 
   const width = image.naturalWidth;
   const height = image.naturalHeight;
@@ -109,7 +95,7 @@ async function refineAlpha(imageSrc: string, amount: number): Promise<string> {
   maskCanvas.width = width;
   maskCanvas.height = height;
   const mCtx = maskCanvas.getContext('2d');
-  if (!mCtx) return imageSrc;
+  if (!mCtx) return image.src;
   
   mCtx.drawImage(image, 0, 0);
   mCtx.globalCompositeOperation = 'source-in';
@@ -121,7 +107,7 @@ async function refineAlpha(imageSrc: string, amount: number): Promise<string> {
   blurCanvas.width = width;
   blurCanvas.height = height;
   const bCtx = blurCanvas.getContext('2d');
-  if (!bCtx) return imageSrc;
+  if (!bCtx) return image.src;
   
   // The magic ratio: blur radius controls the softness of erosion
   bCtx.filter = `blur(${amount * 0.8}px)`;
@@ -164,6 +150,7 @@ export default function Home() {
 
   // Layout State
   const [activeTab, setActiveTab] = useState<"generator" | "manual">("generator");
+  const [rembgModel, setRembgModel] = useState<'standard' | 'smart'>('standard');
 
   // Upscale Rate Limiting State
   const [globalUpscaleState, setGlobalUpscaleState] = useState<"IDLE" | "PROCESSING" | "COOLDOWN">("IDLE");
@@ -226,6 +213,18 @@ export default function Home() {
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  
+  // v11.1.68: Pure Studio Session Meta-State
+  const stableStudioUrl = useMemo(() => {
+    if (!studioTarget) return "";
+    const target = (studioTarget.tab === 'gen' ? generatedImages : manualImages)[studioTarget.idx];
+    if (!target) return "";
+    const url = target.url;
+    // Data URLs/Blobs are always CORS-safe, no timestamp needed
+    if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+    // Append a stable timestamp for the current sticker to break CORS cache per session
+    return `${url}?t=studio-${studioTarget.tab}-${studioTarget.idx}`;
+  }, [studioTarget, generatedImages, manualImages]);
 
   useEffect(() => {
     setIsClient(true);
@@ -325,8 +324,8 @@ export default function Home() {
     setIsRefining(true);
     const timeout = setTimeout(async () => {
       try {
-        const target = (studioTarget.tab === 'gen' ? generatedImages : manualImages)[studioTarget.idx];
-        const preview = await refineAlpha(target.upscaledUrl || target.url, refineAmount);
+        if (!imgRef.current) return;
+        const preview = await refineAlpha(imgRef.current, refineAmount);
         setRefinedPreviewUrl(preview);
       } catch (err) {
         console.error("Preview Refine Error:", err);
@@ -357,7 +356,7 @@ export default function Home() {
         ctx.drawImage(img, 0, 0);
       };
       img.crossOrigin = "anonymous";
-      img.src = refinedPreviewUrl || target?.url || "";
+      img.src = refinedPreviewUrl || stableStudioUrl || "";
     }, 50);
 
     return () => clearTimeout(timeout);
@@ -419,7 +418,7 @@ export default function Home() {
   const handleGenerate = async () => {
     if (!prompt.trim() || isGenerating) return;
     setIsGenerating(true);
-    setGeneratedImages([]);
+    // v11.1: Accumulative results - no more gallery clearing
     setProgress(0);
     try {
       const results: any[] = [];
@@ -440,13 +439,17 @@ export default function Home() {
         const bgRes = await fetch('/api/generate', {
           method: 'POST',
           headers: API_HEADERS,
-          body: JSON.stringify({ action: "remove_bg", imageUrl: genData.imageUrl }),
+          body: JSON.stringify({ 
+            action: "remove_bg", 
+            imageUrl: genData.imageUrl,
+            rembgModel: rembgModel
+          }),
         });
         const bgData = await bgRes.json();
         if (!bgRes.ok) throw new Error(bgData.error);
 
-        results.push({ url: bgData.imageUrl });
-        setGeneratedImages([...results]); 
+        const newSticker = { url: bgData.imageUrl };
+        setGeneratedImages(prev => [...prev, newSticker]); 
         setProgress(((i + 1) / batchSize) * 100);
         if (i < batchSize - 1) await new Promise(r => setTimeout(r, 10000));
       }
@@ -455,6 +458,14 @@ export default function Home() {
       alert(`Error: ${err.message}`);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleDeleteAI = (index: number) => {
+    setGeneratedImages(prev => prev.filter((_, i) => i !== index));
+    if (studioTarget?.tab === 'gen' && studioTarget.idx === index) {
+      setStudioTarget(null);
+      setShowStudioControls(false);
     }
   };
 
@@ -523,25 +534,66 @@ export default function Home() {
   };
 
   const handleSaveCrop = async () => {
-    if (!studioTarget || studioTarget.tab !== 'manual' || !completedCrop) return;
-    const idx = studioTarget.idx;
+    if (!studioTarget || (!completedCrop && !crop)) return;
+    const { idx, tab } = studioTarget;
     setIsCropping(true);
     try {
-      // v7.12: Use percentage-based 'crop' for absolute accuracy
-      const croppedImage = await getCroppedImg(
-        manualImages[idx].upscaledUrl || manualImages[idx].url, 
-        crop!
-      );
-      const newImages = [...manualImages];
-      newImages[idx] = {
-        ...newImages[idx],
-        id: Math.random().toString(36).substr(2, 9), // v7.11: Refresh ID to force Gallery re-render
-        url: croppedImage,
-        originalUrl: croppedImage,
-        upscaledUrl: undefined, // New crop source, reset 4K
-        isBackgroundRemoved: manualImages[idx].isBackgroundRemoved
+      const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
+      const image = imgRef.current;
+      
+      if (!image) throw new Error("Image reference not found");
+
+      // Calculate Scaling Factor (Natural vs Displayed)
+      const scaleX = image.naturalWidth / image.width;
+      const scaleY = image.naturalHeight / image.height;
+
+      // Ensure we use precise pixel coordinates
+      const finalPixelCrop = completedCrop || {
+        x: (crop?.x || 0) * (image.width / 100),
+        y: (crop?.y || 0) * (image.height / 100),
+        width: (crop?.width || 100) * (image.width / 100),
+        height: (crop?.height || 100) * (image.height / 100)
       };
-      setManualImages(newImages);
+
+      const scaledPixelCrop: PixelCrop = {
+        unit: 'px',
+        x: finalPixelCrop.x * scaleX,
+        y: finalPixelCrop.y * scaleY,
+        width: finalPixelCrop.width * scaleX,
+        height: finalPixelCrop.height * scaleY
+      };
+
+      const croppedImage = await getCroppedImg(
+        image, 
+        scaledPixelCrop
+      );
+      
+      if (tab === 'gen') {
+        setGeneratedImages(prev => {
+          const newImages = [...prev];
+          if (!newImages[idx]) return prev;
+          newImages[idx] = {
+            ...newImages[idx],
+            url: croppedImage,
+            upscaledUrl: undefined
+          };
+          return newImages;
+        });
+      } else {
+        setManualImages(prev => {
+          const newImages = [...prev];
+          if (!newImages[idx]) return prev;
+          newImages[idx] = {
+            ...newImages[idx],
+            id: Math.random().toString(36).substr(2, 9), 
+            url: croppedImage,
+            originalUrl: croppedImage,
+            upscaledUrl: undefined,
+            isBackgroundRemoved: newImages[idx].isBackgroundRemoved
+          };
+          return newImages;
+        });
+      }
       setStudioTarget(null);
       setShowStudioControls(false);
     } catch (e) {
@@ -558,32 +610,36 @@ export default function Home() {
     setIsRefining(true);
     try {
       // Use pre-calculated preview if available and consistent
-      const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       const resultUrl = refinedPreviewUrl || await refineAlpha(
-        target.upscaledUrl || target.url, 
+        imgRef.current!, 
         refineAmount
       );
       
       if (tab === 'gen') {
-        const newImages = [...generatedImages];
-        // v10.0: Commit as new base (Incremental)
-        newImages[idx] = { 
-          ...newImages[idx], 
-          url: resultUrl, 
-          upscaledUrl: undefined 
-        };
-        setGeneratedImages(newImages);
+        setGeneratedImages(prev => {
+          const newImages = [...prev];
+          if (!newImages[idx]) return prev;
+          newImages[idx] = { 
+            ...newImages[idx], 
+            url: resultUrl, 
+            upscaledUrl: undefined 
+          };
+          return newImages;
+        });
       } else {
-        const newImages = [...manualImages];
-        newImages[idx] = { 
-          ...newImages[idx], 
-          id: Math.random().toString(36).substr(2, 9), // Force re-render
-          url: resultUrl, 
-          originalUrl: resultUrl, // v10.0: Commit as new base for all tools
-          upscaledUrl: undefined,
-          isBackgroundRemoved: manualImages[idx].isBackgroundRemoved
-        };
-        setManualImages(newImages);
+        setManualImages(prev => {
+          const newImages = [...prev];
+          if (!newImages[idx]) return prev;
+          newImages[idx] = { 
+            ...newImages[idx], 
+            id: Math.random().toString(36).substr(2, 9), 
+            url: resultUrl, 
+            originalUrl: resultUrl, 
+            upscaledUrl: undefined,
+            isBackgroundRemoved: newImages[idx].isBackgroundRemoved
+          };
+          return newImages;
+        });
       }
       setStudioTarget(null);
       setShowStudioControls(false);
@@ -794,7 +850,11 @@ export default function Home() {
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: API_HEADERS,
-          body: JSON.stringify({ action: type, imageUrl: type === "upscale" ? (target.upscaledUrl || target.url) : target.url }),
+          body: JSON.stringify({ 
+            action: type, 
+            imageUrl: type === "upscale" ? (target.upscaledUrl || target.url) : target.url,
+            rembgModel: type === "remove_bg" ? rembgModel : undefined
+          }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
@@ -839,7 +899,11 @@ export default function Home() {
               const res = await fetch('/api/generate', {
                 method: 'POST',
                 headers: API_HEADERS,
-                body: JSON.stringify({ action: "remove_bg", imageUrl: img.originalUrl }),
+                body: JSON.stringify({ 
+                  action: "remove_bg", 
+                  imageUrl: img.originalUrl,
+                  rembgModel: rembgModel
+                }),
               });
               const data = await res.json();
               if (res.ok) {
@@ -954,9 +1018,58 @@ export default function Home() {
 
       <div className="text-center mb-8 mt-8">
         <h1 className="text-4xl md:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-purple-400">StickerMaker AI</h1>
-        <div className="inline-flex bg-white/5 border border-white/10 p-1 rounded-2xl backdrop-blur-md mt-6">
-           <button onClick={() => setActiveTab("generator")} className={clsx("px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}> <Zap className="w-4 h-4" /> AI Generator </button>
-           <button onClick={() => setActiveTab("manual")} className={clsx("px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}> <Upload className="w-4 h-4" /> Manual Tool </button>
+        {/* Header Switchers Container */}
+        <div className={clsx(
+          "flex flex-row items-center justify-center gap-2 md:gap-3 mt-8 scale-[0.85] md:scale-100 transition-all origin-center",
+          (isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE') && "opacity-50 pointer-events-none"
+        )}>
+          {/* Main Tab Switcher */}
+          <div className="inline-flex bg-white/5 border border-white/10 p-0.5 md:p-1 rounded-2xl backdrop-blur-md">
+             <button 
+               onClick={() => { setActiveTab("generator"); setStudioTarget(null); setPreviewImage(null); }} 
+               disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+               className={clsx("px-3 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
+             > 
+               <Zap className="w-3.5 h-3.5 md:w-4 h-4" /> AI Generator 
+             </button>
+             <button 
+               onClick={() => { setActiveTab("manual"); setStudioTarget(null); setPreviewImage(null); }} 
+               disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+               className={clsx("px-3 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
+             > 
+               <Upload className="w-3.5 h-3.5 md:w-4 h-4" /> Manual Tool 
+             </button>
+          </div>
+
+          <div className="w-px h-5 md:h-6 bg-white/10 mx-0.5" />
+
+          {/* Global Background Removal Mode Switcher (Compact Icon Toggle) */}
+          <div className="flex p-0.5 md:p-1 bg-white/5 rounded-2xl border border-white/10 backdrop-blur-md">
+            <div className="flex bg-black/40 rounded-xl p-0.5">
+              <button
+                onClick={() => setRembgModel('standard')}
+                disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+                title="Standard Mode (Rapi)"
+                className={clsx(
+                  "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center",
+                  rembgModel === 'standard' ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-400"
+                )}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 md:w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setRembgModel('smart')}
+                disabled={isGenerating || isManualBatchProcessing || globalUpscaleState !== 'IDLE'}
+                title="Smart Mode (Detail)"
+                className={clsx(
+                  "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center",
+                  rembgModel === 'smart' ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-400"
+                )}
+              >
+                <Zap className="w-3.5 h-3.5 md:w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1029,6 +1142,7 @@ export default function Home() {
                     <Upload className="w-8 h-8 text-zinc-500" />
                     <p className="text-zinc-500 text-[10px] text-center">Seret banyak file ke sini atau klik untuk memilih.</p>
                  </div>
+
                  <div className="flex flex-col gap-3">
                     <button 
                       onClick={() => handleBatchManual("remove_bg")} 
@@ -1083,6 +1197,7 @@ export default function Home() {
                     setStudioMode(initialMode || 'REFINE');
                     setStudioTarget({idx, tab: 'gen'}); 
                   }}
+                  onDelete={() => handleDeleteAI(idx)}
                   globalLock={globalUpscaleState !== "IDLE" || isGenerating} 
                   upscaleCooldownTime={upscaleCooldownTime}
                 />
@@ -1154,7 +1269,6 @@ export default function Home() {
                <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5 w-full md:w-auto">
                  <button 
                    onClick={() => setStudioMode('CROP')} 
-                   disabled={studioTarget?.tab === 'gen'}
                    className={clsx(
                      "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
                      studioMode === 'CROP' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white disabled:opacity-20 disabled:grayscale"
@@ -1200,7 +1314,8 @@ export default function Home() {
                     <div className="relative">
                        <img
                         alt="Refine Target"
-                        src={refinedPreviewUrl || (studioTarget?.tab === 'gen' ? generatedImages : manualImages)[studioTarget?.idx || 0].url}
+                        crossOrigin="anonymous"
+                        src={refinedPreviewUrl || stableStudioUrl}
                         className="object-contain block select-none pointer-events-none rounded shadow-2xl transition-all duration-300"
                         style={{ 
                           maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
@@ -1324,7 +1439,8 @@ export default function Home() {
                       <img
                         ref={imgRef}
                         alt="Cropme"
-                        src={(studioTarget?.tab === 'manual' ? manualImages[studioTarget.idx] : manualImages[0]).url}
+                        crossOrigin="anonymous"
+                        src={stableStudioUrl}
                         onLoad={onImageLoad}
                         style={{ 
                           maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
@@ -1567,11 +1683,12 @@ export default function Home() {
     </div>
   );
 }
-function StickerCard({ img, onUpscale, onPreview, onRefine, globalLock, upscaleCooldownTime }: {
+function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock, upscaleCooldownTime }: {
   img: any,
   onUpscale: () => void,
   onPreview: () => void,
-  onRefine: (initialMode?: 'REFINE' | 'CLEANUP') => void,
+  onRefine: (initialMode?: 'REFINE' | 'CLEANUP' | 'CROP') => void,
+  onDelete: () => void,
   globalLock: boolean,
   upscaleCooldownTime: number
 }) {
@@ -1622,49 +1739,58 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, globalLock, upscaleC
           </button>
         )}
 
-        <div className="w-full">
+        <div className="w-full grid grid-cols-2 gap-2">
           {!img.upscaledUrl ? (
             <button 
               onClick={(e) => { e.stopPropagation(); onUpscale(); }} 
               disabled={globalLock || img.isUpscaling} 
-              className="w-full py-3 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg border border-white/10 disabled:opacity-40 transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
+              className="w-full py-2 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg border border-white/10 disabled:opacity-40 transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
             >
               <Sparkles className="w-4 h-4" />
-              <span className="text-[10px] font-bold">{globalLock ? `${upscaleCooldownTime}s` : <span className="hidden sm:inline">Upscale ke 4K</span>}</span>
+              <span className="text-[9px] font-extrabold uppercase tracking-tight hidden sm:inline">{globalLock ? `${upscaleCooldownTime}s` : "Upscale 4K"}</span>
+              {globalLock && <span className="text-[9px] font-extrabold sm:hidden">{upscaleCooldownTime}s</span>}
             </button>
           ) : (
-            <div className="w-full py-3 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 flex flex-col items-center justify-center gap-1">
-              <ShieldCheck className="w-5 h-5" /> <span className="text-[10px]">4K Ready</span>
+            <div className="w-full py-2 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 flex flex-col items-center justify-center gap-0.5">
+              <ShieldCheck className="w-4 h-4" /> <span className="text-[9px] uppercase tracking-tight hidden sm:inline">4K READY</span>
             </div>
           )}
-        </div>
-
-        <div className="flex w-full gap-2 border-t border-white/10 pt-3 mt-1">
-          <button onClick={(e) => { e.stopPropagation(); onPreview(); }} className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="View"><Maximize className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">PREVIEW</span></button>
-          <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, "sticker.png"); }} className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Save"><Download className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline">Download</span></button>
-          <div className="relative flex-1">
+          
+          <div className="relative">
             <button 
               onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} 
-              className="w-full py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-lg flex flex-col items-center justify-center transition-colors group/tools" 
+              className="w-full h-full py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-lg flex flex-col items-center justify-center transition-colors group/tools border border-white/10" 
               title="Studio Tools"
             >
-              <Wrench className="w-3.5 h-3.5" />
-              <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5 hidden sm:inline">Tools</span>
+              <Wrench className="w-4 h-4" />
+              <span className="text-[9px] font-extrabold uppercase tracking-tight mt-0.5 hidden sm:inline">Tools</span>
             </button>
             <div className={clsx(
               "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 bg-zinc-950/90 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] transition-all p-1.5 flex flex-col gap-1 z-[60]",
               showTools ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none group-hover/tools:opacity-100 group-hover/tools:scale-100 group-hover/tools:pointer-events-auto"
             )}>
                <div className="absolute top-full left-0 right-0 h-4" />
-               <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
-               <button 
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('CROP'); }} 
+                  className="w-full py-2 px-3 hover:bg-amber-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-amber-400 border border-transparent hover:border-amber-500/30 transition-all"
+                >
+                  <Scissors className="w-4 h-4" /> Potong
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
+                <button 
                   onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('CLEANUP'); }} 
                   className="w-full py-2 px-3 hover:bg-indigo-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-indigo-400 border border-transparent hover:border-indigo-500/30 transition-all"
-               >
+                >
                   <Wand2 className="w-4 h-4" /> Cleanup
                 </button>
             </div>
           </div>
+        </div>
+
+        <div className="grid grid-cols-3 w-full gap-2 border-t border-white/10 pt-3 mt-1">
+          <button onClick={(e) => { e.stopPropagation(); onPreview(); }} className="py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="View"><Maximize className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">PREVIEW</span></button>
+          <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, "sticker.png"); }} className="py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Save"><Download className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline text-white">SAVE</span></button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg flex flex-col items-center justify-center transition-colors px-1 border border-red-500/20" title="Hapus"><Trash2 className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">HAPUS</span></button>
         </div>
       </div>
     </div>
@@ -1677,7 +1803,7 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine,
   onManualAction: (idx: number, type: "remove_bg" | "upscale") => void, 
   onCropOpen: (idx: number) => void, 
   onPreview: (url: string) => void, 
-  onRefine: (idx: number, initialMode?: 'REFINE' | 'CLEANUP') => void,
+  onRefine: (idx: number, initialMode?: 'REFINE' | 'CLEANUP' | 'CROP') => void,
   onDelete: (id: string) => void, 
   globalLock: boolean, 
   upscaleCooldownTime: number, 
@@ -1764,7 +1890,7 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine,
                   showTools ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none group-hover/tools:opacity-100 group-hover/tools:scale-100 group-hover/tools:pointer-events-auto"
                 )}>
                   <div className="absolute top-full left-0 right-0 h-4" />
-                  <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onCropOpen(idx); }} className="w-full py-2 px-3 hover:bg-pink-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-pink-400 border border-transparent hover:border-pink-500/30 transition-all"><Scissors className="w-4 h-4" /> Crop</button>
+                  <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onCropOpen(idx); }} className="w-full py-2 px-3 hover:bg-amber-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-amber-400 border border-transparent hover:border-amber-500/30 transition-all"><Scissors className="w-4 h-4" /> Potong</button>
                   <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine(idx, 'REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
                   <button 
                     onClick={(e) => { 

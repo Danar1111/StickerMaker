@@ -171,10 +171,15 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
         } 
         
         else if (action === "remove_bg") {
+            const { rembgModel } = body;
             const payloadSize = imageUrl ? Math.round(imageUrl.length / 1024) : 0;
-            console.log(`[API] Action: remove_bg, Payload Size: ${payloadSize} KB`);
+            console.log(`[API] Action: remove_bg, Model: ${rembgModel}, Payload Size: ${payloadSize} KB`);
             
-            const rembgModelVersion = "fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003";
+            // Standard (Original) vs Smart (InSPyReNet)
+            const rembgModelVersion = rembgModel === 'smart' 
+                ? "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc"
+                : "fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003";
+
             const transparentImageUrl = await runReplicate(
                 rembgModelVersion,
                 { image: imageUrl },
