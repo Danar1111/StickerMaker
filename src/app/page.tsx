@@ -8,7 +8,6 @@ import {
   Download, 
   Loader2, 
   Trash2, 
-  Maximize, 
   Scissors, 
   ExternalLink, 
   X, 
@@ -22,7 +21,16 @@ import {
   LogOut,
   ChevronDown,
   Layout,
-  Lock
+  Lock,
+  Wrench,
+  Sliders,
+  Undo2,
+  Redo2,
+  Eraser,
+  Hand,
+  ZoomIn,
+  ZoomOut,
+  Maximize
 } from "lucide-react";
 import ReactCrop, { Crop, PixelCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -178,7 +186,8 @@ export default function Home() {
     url: string, 
     isProcessing: boolean, 
     isUpscaling: boolean, 
-    upscaledUrl?: string
+    upscaledUrl?: string,
+    isBackgroundRemoved?: boolean
   }[]>([]);
   const [isManualBatchProcessing, setIsManualBatchProcessing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -186,9 +195,8 @@ export default function Home() {
   const [isStyleOpen, setIsStyleOpen] = useState(false);
   const styleDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Studio State (Crop/Refine v8.1)
-  const [croppingIdx, setCroppingIdx] = useState<number | null>(null);
-  const [refiningIdx, setRefiningIdx] = useState<{idx: number, tab: 'gen'|'manual'} | null>(null);
+  // Studio State (v11.1)
+  const [studioTarget, setStudioTarget] = useState<{idx: number, tab: 'gen'|'manual'} | null>(null);
   const [refineAmount, setRefineAmount] = useState(2);
   const [isRefining, setIsRefining] = useState(false);
   const [refinedPreviewUrl, setRefinedPreviewUrl] = useState<string | null>(null);
@@ -198,6 +206,24 @@ export default function Home() {
   const [isCropping, setIsCropping] = useState(false);
   const [showCropControls, setShowCropControls] = useState(true);
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // v11.0: Universal Studio & Cleanup Suite
+  const [studioMode, setStudioMode] = useState<'CROP' | 'REFINE' | 'CLEANUP'>('CROP');
+  const [brushSize, setBrushSize] = useState(25);
+  const [wandTolerance, setWandTolerance] = useState(30);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const cleanupCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [cleanupHistory, setCleanupHistory] = useState<string[]>([]);
+  const [cleanupRedoStack, setCleanupRedoStack] = useState<string[]>([]);
+  const [showStudioControls, setShowStudioControls] = useState(false);
+  const [cleanupTool, setCleanupTool] = useState<'WAND' | 'ERASER'>('WAND');
+  const [brushCirclePos, setBrushCirclePos] = useState<{ x: number, y: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanMode, setIsPanMode] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
@@ -223,6 +249,57 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Workspace Keyboard & Zoom Controllers
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (studioMode !== 'CLEANUP') return;
+      
+      const isZ = e.key.toLowerCase() === 'z';
+      const isY = e.key.toLowerCase() === 'y';
+      const isCtrl = e.ctrlKey || e.metaKey;
+
+      if (e.code === 'Space') {
+          setIsSpacePressed(true);
+          e.preventDefault();
+      }
+
+      if (isCtrl && isZ) {
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+        e.preventDefault();
+      } else if (isCtrl && isY) {
+        handleRedo();
+        e.preventDefault();
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') setIsSpacePressed(false);
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [studioMode, cleanupHistory, cleanupRedoStack]);
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (studioMode !== 'CLEANUP') return;
+    e.preventDefault();
+    
+    if (e.altKey && cleanupTool === 'ERASER') {
+      // Alt + Scroll = Adjust Brush Size
+      const step = e.deltaY > 0 ? -2 : 2;
+      setBrushSize(prev => Math.min(Math.max(1, prev + step), 100));
+    } else {
+      // Direct Scroll = Zoom (Industry Standard)
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoom(prev => Math.min(Math.max(0.5, prev * delta), 10));
+    }
+  };
+
   // Responsive Hook for CropModal
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -236,15 +313,19 @@ export default function Home() {
 
   // Real-time Refine Preview Engine (v9.0)
   useEffect(() => {
-    if (!refiningIdx) {
+    if (studioTarget === null) {
       setRefinedPreviewUrl(null);
+      setCleanupHistory([]);
+      setCleanupRedoStack([]);
+      setStudioMode('REFINE');
+      setShowStudioControls(false);
       return;
     }
     
     setIsRefining(true);
     const timeout = setTimeout(async () => {
       try {
-        const target = (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx];
+        const target = (studioTarget.tab === 'gen' ? generatedImages : manualImages)[studioTarget.idx];
         const preview = await refineAlpha(target.upscaledUrl || target.url, refineAmount);
         setRefinedPreviewUrl(preview);
       } catch (err) {
@@ -255,7 +336,32 @@ export default function Home() {
     }, 200); // 200ms debounce
 
     return () => clearTimeout(timeout);
-  }, [refiningIdx, refineAmount, generatedImages, manualImages]);
+  }, [studioTarget, refineAmount, generatedImages, manualImages]);
+
+  // Cleanup Canvas Synchronization (v11.1)
+  useEffect(() => {
+    if (studioMode !== 'CLEANUP' || !studioTarget) return;
+
+    const timeout = setTimeout(() => {
+      const canvas = cleanupCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      const target = (studioTarget.tab === 'gen' ? generatedImages : manualImages)[studioTarget.idx];
+      const img = new Image();
+      img.onload = () => {
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        ctx.clearRect(0, 0, canvas.width, canvas.height); // Reset
+        ctx.drawImage(img, 0, 0);
+      };
+      img.crossOrigin = "anonymous";
+      img.src = refinedPreviewUrl || target?.url || "";
+    }, 50);
+
+    return () => clearTimeout(timeout);
+  }, [studioMode, studioTarget, refinedPreviewUrl, generatedImages, manualImages]);
 
   const [isVerifying, setIsVerifying] = useState(false);
   const [authError, setAuthError] = useState("");
@@ -400,7 +506,7 @@ export default function Home() {
         
         setManualImages(prev => [
           ...prev, 
-          { id: Math.random().toString(36).substr(2, 9), originalUrl: dataUrl, url: dataUrl, isProcessing: false, isUpscaling: false }
+          { id: Math.random().toString(36).substr(2, 9), originalUrl: dataUrl, url: dataUrl, isProcessing: false, isUpscaling: false, isBackgroundRemoved: false }
         ]);
       };
       img.src = event.target?.result as string;
@@ -417,24 +523,27 @@ export default function Home() {
   };
 
   const handleSaveCrop = async () => {
-    if (croppingIdx === null || !completedCrop) return;
+    if (!studioTarget || studioTarget.tab !== 'manual' || !completedCrop) return;
+    const idx = studioTarget.idx;
     setIsCropping(true);
     try {
       // v7.12: Use percentage-based 'crop' for absolute accuracy
       const croppedImage = await getCroppedImg(
-        manualImages[croppingIdx].upscaledUrl || manualImages[croppingIdx].url, 
+        manualImages[idx].upscaledUrl || manualImages[idx].url, 
         crop!
       );
       const newImages = [...manualImages];
-      newImages[croppingIdx] = {
-        ...newImages[croppingIdx],
+      newImages[idx] = {
+        ...newImages[idx],
         id: Math.random().toString(36).substr(2, 9), // v7.11: Refresh ID to force Gallery re-render
         url: croppedImage,
         originalUrl: croppedImage,
-        upscaledUrl: undefined // New crop source, reset 4K
+        upscaledUrl: undefined, // New crop source, reset 4K
+        isBackgroundRemoved: manualImages[idx].isBackgroundRemoved
       };
       setManualImages(newImages);
-      setCroppingIdx(null);
+      setStudioTarget(null);
+      setShowStudioControls(false);
     } catch (e) {
       console.error(e);
       alert("Gagal memotong gambar.");
@@ -444,38 +553,40 @@ export default function Home() {
   };
 
   const handleSaveRefine = async () => {
-    if (!refiningIdx) return;
+    if (!studioTarget) return;
+    const { idx, tab } = studioTarget;
     setIsRefining(true);
     try {
       // Use pre-calculated preview if available and consistent
+      const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       const resultUrl = refinedPreviewUrl || await refineAlpha(
-        (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx].upscaledUrl || 
-        (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx].url, 
+        target.upscaledUrl || target.url, 
         refineAmount
       );
       
-      if (refiningIdx.tab === 'gen') {
+      if (tab === 'gen') {
         const newImages = [...generatedImages];
-        const target = newImages[refiningIdx.idx];
         // v10.0: Commit as new base (Incremental)
-        newImages[refiningIdx.idx] = { 
-          ...target, 
+        newImages[idx] = { 
+          ...newImages[idx], 
           url: resultUrl, 
           upscaledUrl: undefined 
         };
         setGeneratedImages(newImages);
       } else {
         const newImages = [...manualImages];
-        newImages[refiningIdx.idx] = { 
-          ...newImages[refiningIdx.idx], 
+        newImages[idx] = { 
+          ...newImages[idx], 
           id: Math.random().toString(36).substr(2, 9), // Force re-render
           url: resultUrl, 
           originalUrl: resultUrl, // v10.0: Commit as new base for all tools
-          upscaledUrl: undefined 
+          upscaledUrl: undefined,
+          isBackgroundRemoved: manualImages[idx].isBackgroundRemoved
         };
         setManualImages(newImages);
       }
-      setRefiningIdx(null);
+      setStudioTarget(null);
+      setShowStudioControls(false);
       setRefinedPreviewUrl(null);
     } catch (e) {
       console.error(e);
@@ -483,6 +594,155 @@ export default function Home() {
     } finally {
       setIsRefining(false);
     }
+  };
+
+  // v11.1.11: Coordinate Helper for touch/mouse unity
+  const getEventCoords = (e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) => {
+    const canvas = cleanupCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    
+    // Support both mouse and touch, accounting for React synthetic events vs native
+    const clientX = (e as any).touches ? (e as any).touches[0].clientX : (e as any).clientX;
+    const clientY = (e as any).touches ? (e as any).touches[0].clientY : (e as any).clientY;
+    
+    // Position relative to canvas display element
+    const displayX = clientX - rect.left;
+    const displayY = clientY - rect.top;
+
+    // Convert display position to natural canvas coordinates
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    return {
+      x: Math.floor(displayX * scaleX),
+      y: Math.floor(displayY * scaleY)
+    };
+  };
+
+  const handleMagicWand = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = cleanupCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    const { x, y } = getEventCoords(e);
+    if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return;
+
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imgData.data;
+    const startIdx = (y * canvas.width + x) * 4;
+    const startR = pixels[startIdx];
+    const startG = pixels[startIdx + 1];
+    const startB = pixels[startIdx + 2];
+    const startA = pixels[startIdx + 3];
+
+    if (startA < 10) return; // Ignore transparent
+
+    saveCleanupState();
+    setIsCleaning(true);
+    const stack = [[x, y]];
+    const visited = new Uint8Array(canvas.width * canvas.height);
+
+    while (stack.length > 0) {
+      const [currX, currY] = stack.pop()!;
+      const idx = (currY * canvas.width + currX) * 4;
+
+      if (visited[currY * canvas.width + currX]) continue;
+      visited[currY * canvas.width + currX] = 1;
+
+      const diff = Math.sqrt(
+        Math.pow(pixels[idx] - startR, 2) +
+        Math.pow(pixels[idx + 1] - startG, 2) +
+        Math.pow(pixels[idx + 2] - startB, 2)
+      );
+
+      if (diff <= wandTolerance) {
+        pixels[idx + 3] = 0;
+        if (currX > 0) stack.push([currX - 1, currY]);
+        if (currX < canvas.width - 1) stack.push([currX + 1, currY]);
+        if (currY > 0) stack.push([currX, currY - 1]);
+        if (currY < canvas.height - 1) stack.push([currX, currY + 1]);
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    setRefinedPreviewUrl(canvas.toDataURL());
+    setIsCleaning(false);
+  };
+
+  const handleEraserMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const isTouch = 'touches' in e.nativeEvent;
+    if (!isTouch && (e as React.MouseEvent).buttons !== 1) return;
+    
+    const canvas = cleanupCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const { x, y } = getEventCoords(e);
+
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  const finalizeCleanup = () => {
+    const canvas = cleanupCanvasRef.current;
+    if (canvas) setRefinedPreviewUrl(canvas.toDataURL());
+  };
+
+  const saveCleanupState = () => {
+    const canvas = cleanupCanvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL();
+    setCleanupHistory(prev => [...prev.slice(-19), dataUrl]);
+    setCleanupRedoStack([]); // Clear redo on action
+  };
+
+  const handleUndo = () => {
+    if (cleanupHistory.length === 0) return;
+    const canvas = cleanupCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const currentState = canvas.toDataURL();
+    const prevState = cleanupHistory[cleanupHistory.length - 1];
+    
+    setCleanupRedoStack(prev => [...prev, currentState]);
+    setCleanupHistory(prev => prev.slice(0, -1));
+
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      setRefinedPreviewUrl(canvas.toDataURL());
+    };
+    img.src = prevState;
+  };
+
+  const handleRedo = () => {
+    if (cleanupRedoStack.length === 0) return;
+    const canvas = cleanupCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const currentState = canvas.toDataURL();
+    const nextState = cleanupRedoStack[cleanupRedoStack.length - 1];
+
+    setCleanupHistory(prev => [...prev, currentState]);
+    setCleanupRedoStack(prev => prev.slice(0, -1));
+
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      setRefinedPreviewUrl(canvas.toDataURL());
+    };
+    img.src = nextState;
   };
 
   const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -515,7 +775,7 @@ export default function Home() {
       x: (initialCrop.x * naturalWidth) / 100,
       y: (initialCrop.y * naturalHeight) / 100,
       width: (initialCrop.width * naturalWidth) / 100,
-      height: (initialCrop.height * naturalHeight) / 100,
+      height: (initialCrop.height * naturalHeight) / 100
     };
     setCompletedCrop(pixelCrop);
   };
@@ -539,7 +799,10 @@ export default function Home() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
 
-        if (type === "remove_bg") newImages[idx].url = data.imageUrl;
+        if (type === "remove_bg") {
+          newImages[idx].url = data.imageUrl;
+          newImages[idx].isBackgroundRemoved = true;
+        }
         else newImages[idx].upscaledUrl = data.imageUrl;
         
         triggerCooldown();
@@ -583,6 +846,7 @@ export default function Home() {
                 setManualImages(prev => {
                   const updated = [...prev];
                   updated[i].url = data.imageUrl;
+                  updated[i].isBackgroundRemoved = true;
                   return updated;
                 });
                 if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
@@ -814,7 +1078,11 @@ export default function Home() {
                   img={img} 
                   onUpscale={() => handleUpscale(idx)} 
                   onPreview={() => setPreviewImage(img.upscaledUrl || img.url)} 
-                  onRefine={() => { setRefineAmount(1); setRefiningIdx({idx, tab: 'gen'}); }}
+                  onRefine={(initialMode) => { 
+                    setRefineAmount(1); 
+                    setStudioMode(initialMode || 'REFINE');
+                    setStudioTarget({idx, tab: 'gen'}); 
+                  }}
                   globalLock={globalUpscaleState !== "IDLE" || isGenerating} 
                   upscaleCooldownTime={upscaleCooldownTime}
                 />
@@ -825,13 +1093,18 @@ export default function Home() {
                     idx={idx}
                     onManualAction={handleManualAction}
                     onCropOpen={(idx) => {
-                      setCroppingIdx(idx); 
+                      setStudioTarget({idx, tab: 'manual'}); 
+                      setStudioMode('CROP');
                       setCrop(undefined); 
                       setCropAspect(undefined);
                       setShowCropControls(true);
                     }}
                     onPreview={(url) => setPreviewImage(url)}
-                    onRefine={(idx) => { setRefineAmount(1); setRefiningIdx({idx, tab: 'manual'}); }}
+                    onRefine={(idx, initialMode) => { 
+                      setRefineAmount(1); 
+                      setStudioMode(initialMode || 'REFINE');
+                      setStudioTarget({idx, tab: 'manual'}); 
+                    }}
                     onDelete={(id) => setManualImages(m => m.filter(x => x.id !== id))}
                     globalLock={globalUpscaleState !== "IDLE" || isManualBatchProcessing || isGenerating}
                     upscaleCooldownTime={upscaleCooldownTime}
@@ -855,60 +1128,188 @@ export default function Home() {
         </div>
       )}
 
-      {/* Studio Modal (Crop & Refine v8.3) */}
-      {(croppingIdx !== null || refiningIdx !== null) && (
+      {/* Ultimate Universal Studio Modal (v11.0) */}
+      {studioTarget !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-4 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-black/95 backdrop-blur-3xl" />
           
           <div className="relative w-full h-full max-w-7xl bg-zinc-950 sm:rounded-[32px] overflow-hidden flex flex-col border border-white/10 shadow-2xl">
-            {/* Modal Header */}
-            <div className="p-4 md:p-6 border-b border-white/5 flex items-center justify-between bg-zinc-900/50">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white">
-                  {refiningIdx ? <Sparkles className="w-5 h-5" /> : <Scissors className="w-5 h-5" />}
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white leading-tight">
-                    {refiningIdx ? "Edge Shaver Studio" : "Precision Cropping"}
-                  </h3>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                    <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black">Pro Studio v8.3</span>
+            <div className="p-2 md:p-5 border-b border-white/5 flex flex-row items-center justify-between bg-zinc-900/50 gap-2 md:gap-4">
+              {!isMobile && (
+                <div className="flex items-center gap-4 w-full md:w-auto">
+                  <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 text-white">
+                    <Wrench className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white leading-tight">Ultimate Studio</h3>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black">Professional Editor</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => { setCroppingIdx(null); setRefiningIdx(null); }}
-                  className="p-2 hover:bg-white/5 text-zinc-500 hover:text-white rounded-full transition-all"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-            </div>
+              )}
+ 
+               {/* Mode Tabs */}
+               <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5 w-full md:w-auto">
+                 <button 
+                   onClick={() => setStudioMode('CROP')} 
+                   disabled={studioTarget?.tab === 'gen'}
+                   className={clsx(
+                     "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
+                     studioMode === 'CROP' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white disabled:opacity-20 disabled:grayscale"
+                   )}
+                 >
+                   <Scissors className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Potong</span>
+                 </button>
+                 <button 
+                   onClick={() => setStudioMode('REFINE')} 
+                   className={clsx(
+                     "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
+                     studioMode === 'REFINE' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white"
+                   )}
+                 >
+                   <Sparkles className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Refine</span>
+                 </button>
+                 <button 
+                   onClick={() => setStudioMode('CLEANUP')} 
+                   className={clsx(
+                     "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
+                     studioMode === 'CLEANUP' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white"
+                   )}
+                 >
+                   <Wand2 className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Bersihkan</span>
+                 </button>
+               </div>
+ 
+               <div className="flex items-center gap-2">
+                 <button 
+                   onClick={() => { setStudioTarget(null); setShowStudioControls(false); }}
+                   className="p-1.5 md:p-2 hover:bg-white/5 text-zinc-500 hover:text-white rounded-full transition-all"
+                 >
+                   <X className="w-5 md:w-6 h-5 md:h-6" />
+                 </button>
+               </div>
+             </div>
 
             <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
               {/* Main Stage */}
-              <div className="flex-1 min-h-0 relative bg-black overflow-hidden transition-all duration-500">
-                <div className="absolute inset-0 flex items-center justify-center p-4 md:p-12">
-                  {refiningIdx ? (
-                    <div className="relative group">
+              <div className="flex-1 min-h-0 relative bg-black overflow-hidden group">
+                <div className="absolute inset-0 flex items-center justify-center p-4 md:p-8">
+                  {studioMode === 'REFINE' ? (
+                    <div className="relative">
                        <img
                         alt="Refine Target"
-                        src={refinedPreviewUrl || (refiningIdx.tab === 'gen' ? generatedImages : manualImages)[refiningIdx.idx].url}
+                        src={refinedPreviewUrl || (studioTarget?.tab === 'gen' ? generatedImages : manualImages)[studioTarget?.idx || 0].url}
                         className="object-contain block select-none pointer-events-none rounded shadow-2xl transition-all duration-300"
                         style={{ 
-                          maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(100vh - 180px)',
-                          maxWidth: isMobile ? '100%' : 'calc(100vw - 420px)'
+                          maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
+                          maxWidth: '100%'
                         }}
                       />
                       {isRefining && (
-                        <div className="absolute inset-0 bg-black/20 flex items-center justify-center backdrop-blur-[1px] rounded transition-opacity">
-                           <div className="flex flex-col items-center gap-2">
-                             <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
-                             <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Kikisan Otomatis...</span>
-                           </div>
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px] rounded">
+                           <Loader2 className="w-10 h-10 animate-spin text-indigo-400" />
+                        </div>
+                      )}
+                    </div>
+                  ) : studioMode === 'CLEANUP' ? (
+                      <div 
+                        className={clsx(
+                          "relative group/cleanup overflow-hidden bg-zinc-950/20 rounded-xl",
+                          (isPanMode || isSpacePressed) ? "cursor-grab active:cursor-grabbing" : cleanupTool === 'ERASER' ? "cursor-none" : "cursor-crosshair"
+                        )}
+                        onWheel={handleWheel}
+                        onPointerMove={(e) => {
+                          const containerRect = e.currentTarget.getBoundingClientRect();
+                          const x = e.clientX - containerRect.left;
+                          const y = e.clientY - containerRect.top;
+                          setBrushCirclePos({ x, y });
+
+                          if (isPanning) {
+                            const dx = e.clientX - lastPanPos.x;
+                            const dy = e.clientY - lastPanPos.y;
+                            setPanOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+                            setLastPanPos({ x: e.clientX, y: e.clientY });
+                          }
+                        }}
+                        onPointerDown={(e) => {
+                          if (isPanMode || isSpacePressed || e.button === 1) {
+                            setIsPanning(true);
+                            setLastPanPos({ x: e.clientX, y: e.clientY });
+                          }
+                        }}
+                        onPointerUp={() => setIsPanning(false)}
+                        onPointerLeave={() => { setBrushCirclePos(null); setIsPanning(false); }}
+                      >
+                        <div 
+                           style={{ 
+                             transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+                             transformOrigin: 'center center',
+                             transition: isPanning ? 'none' : 'transform 0.1s ease-out'
+                           }}
+                        >
+                          <canvas 
+                            ref={cleanupCanvasRef}
+                            onMouseDown={(e) => {
+                              if (isPanning || isPanMode || isSpacePressed || e.button === 1) return;
+                              saveCleanupState();
+                              if (cleanupTool === 'WAND') handleMagicWand(e);
+                              else handleEraserMove(e);
+                            }}
+                            onTouchStart={(e) => {
+                              if (e.touches.length > 1) {
+                                setIsPanning(true);
+                                setLastPanPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+                                return;
+                              }
+                              e.preventDefault();
+                              saveCleanupState();
+                              if (cleanupTool === 'WAND') handleMagicWand(e);
+                              else handleEraserMove(e);
+                            }}
+                            onMouseMove={(e) => {
+                              if (isPanning) return;
+                              if (cleanupTool === 'ERASER') handleEraserMove(e);
+                            }}
+                            onTouchMove={(e) => {
+                              if (isPanning) {
+                                const dx = e.touches[0].clientX - lastPanPos.x;
+                                const dy = e.touches[0].clientY - lastPanPos.y;
+                                setPanOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+                                setLastPanPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+                                return;
+                              }
+                              e.preventDefault();
+                              if (cleanupTool === 'ERASER') handleEraserMove(e);
+                            }}
+                            onMouseUp={finalizeCleanup}
+                            onTouchEnd={(e) => { e.preventDefault(); finalizeCleanup(); setIsPanning(false); }}
+                            style={{ 
+                              maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
+                              maxWidth: '100%',
+                              height: 'auto'
+                            }}
+                            className="rounded shadow-2xl bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-zinc-800 pointer-events-auto"
+                          />
+                        </div>
+                        
+                        {/* Visual Brush Preview */}
+                        {cleanupTool === 'ERASER' && brushCirclePos && !isPanning && !isPanMode && !isSpacePressed && (
+                          <div 
+                            className="pointer-events-none absolute border border-white/50 rounded-full bg-indigo-500/10 backdrop-blur-[1px] transform -translate-x-1/2 -translate-y-1/2 border-dashed transition-[width,height] duration-75"
+                            style={{
+                              left: brushCirclePos.x,
+                              top: brushCirclePos.y,
+                              width: brushSize * zoom,
+                              height: brushSize * zoom,
+                              boxShadow: '0 0 15px rgba(99, 102, 241, 0.4)'
+                            }}
+                          />
+                        )}
+                      {isCleaning && (
+                        <div className="absolute inset-0 bg-black/20 flex items-center justify-center pointer-events-none">
+                          <Loader2 className="w-10 h-10 animate-spin text-indigo-400" />
                         </div>
                       )}
                     </div>
@@ -918,50 +1319,199 @@ export default function Home() {
                       onChange={(c) => setCrop(c)}
                       onComplete={(c) => setCompletedCrop(c)}
                       aspect={cropAspect}
-                      className="shadow-2xl shadow-white/5 transition-all duration-300"
+                      className="shadow-2xl shadow-white/5"
                     >
                       <img
                         ref={imgRef}
                         alt="Cropme"
-                        src={manualImages[croppingIdx!].url}
+                        src={(studioTarget?.tab === 'manual' ? manualImages[studioTarget.idx] : manualImages[0]).url}
                         onLoad={onImageLoad}
                         style={{ 
-                          maxHeight: isMobile ? 'calc(100vh - 250px)' : 'calc(100vh - 180px)',
-                          maxWidth: isMobile ? '100%' : 'calc(100vw - 420px)'
+                          maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
+                          maxWidth: '100%'
                         }}
                         className="object-contain block select-none pointer-events-none rounded shadow-2xl"
                       />
                     </ReactCrop>
                   )}
                 </div>
+
+                {isMobile && (
+                  <div className="absolute bottom-6 right-6 flex flex-col gap-4 z-[90]">
+                    <button 
+                      onClick={() => setShowStudioControls(!showStudioControls)}
+                      className={clsx(
+                        "w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-all border",
+                        showStudioControls ? "bg-white text-zinc-950 border-white rotate-90" : "bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/40"
+                      )}
+                    >
+                      {showStudioControls ? <X className="w-6 h-6" /> : <Sliders className="w-6 h-6" />}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Sidebar controls */}
               <div className={clsx(
-                "absolute bottom-0 left-0 right-0 md:relative md:w-[380px] border-t md:border-t-0 md:border-l border-white/5 p-6 flex flex-col transition-all duration-500 z-50",
-                "bg-zinc-900/90 backdrop-blur-2xl md:bg-zinc-900",
-                !showCropControls && !refiningIdx ? "opacity-0 translate-y-10" : "opacity-100 translate-y-0"
+                "w-full md:w-[320px] bg-zinc-900 border-t md:border-t-0 md:border-l border-white/5 flex flex-col transition-all duration-500 overflow-hidden",
+                isMobile 
+                  ? clsx(
+                      "fixed inset-x-0 bottom-0 z-[100] bg-zinc-950/95 backdrop-blur-2xl rounded-t-[32px] border-t border-white/10 shadow-[0_-8px_40px_rgba(0,0,0,0.8)] p-8 pt-10",
+                      showStudioControls ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
+                    )
+                  : "p-6 overflow-y-auto"
               )}>
-                <div className="space-y-6 flex-1 flex flex-col">
-                  {refiningIdx ? (
+                {isMobile && (
+                  <div className="w-12 h-1.5 bg-white/10 rounded-full absolute top-4 left-1/2 -translate-x-1/2" />
+                )}
+                {isMobile && (
+                  <button 
+                    onClick={() => setShowStudioControls(false)}
+                    className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                )}
+                <div className="flex-1 space-y-8">
+                  {studioMode === 'REFINE' && (
                     <div className="space-y-6">
                       <div className="flex flex-col gap-1">
-                        <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black ml-1">Refinement Strength</span>
-                        <p className="text-[10px] text-zinc-600 ml-1">Kikis sisa background di pinggiran</p>
+                        <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Refinement Control</span>
+                        <p className="text-[10px] text-zinc-500">Menipiskan pinggiran sticker secara global.</p>
                       </div>
-                      <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/5">
-                        <div className="flex justify-between items-center px-1">
-                          <span className="text-xs font-bold text-zinc-400">Kedalaman Kikis</span>
+                      <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-zinc-400">Ketebalan Kikis</span>
                           <span className="text-xl font-black text-indigo-400">{refineAmount}px</span>
                         </div>
                         <input type="range" min="1" max="10" value={refineAmount} onChange={(e) => setRefineAmount(parseInt(e.target.value))} className="w-full accent-indigo-500" />
                       </div>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-black ml-1">Aspect Ratio Matrix</span>
-                        <p className="text-[10px] text-zinc-600 ml-1">Ketuk untuk ubah rasio</p>
+                  )}
+
+                  {studioMode === 'CLEANUP' && (
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/5">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Cleanup Toolkit</span>
+                          <p className="text-[10px] text-zinc-500">Undo/Redo tersedia.</p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button 
+                            onClick={handleUndo} 
+                            disabled={cleanupHistory.length === 0}
+                            className="p-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-20 text-white rounded-lg transition-all"
+                            title="Undo (Ctrl+Z)"
+                          >
+                            <Undo2 className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={handleRedo} 
+                            disabled={cleanupRedoStack.length === 0}
+                            className="p-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-20 text-white rounded-lg transition-all"
+                            title="Redo"
+                          >
+                            <Redo2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Tool Picker */}
+                      <div className="grid grid-cols-3 gap-2 bg-black/20 p-1.5 rounded-2xl border border-white/5">
+                        <button 
+                          onClick={() => { setCleanupTool('WAND'); setIsPanMode(false); }}
+                          className={clsx(
+                            "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95 text-[9px]",
+                            (cleanupTool === 'WAND' && !isPanMode) ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          <Wand2 className="w-3.5 h-3.5" />
+                          Wand
+                        </button>
+                        <button 
+                          onClick={() => { setCleanupTool('ERASER'); setIsPanMode(false); }}
+                          className={clsx(
+                            "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95 text-[9px]",
+                            (cleanupTool === 'ERASER' && !isPanMode) ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          <Eraser className="w-3.5 h-3.5" />
+                          Eraser
+                        </button>
+                        <button 
+                          onClick={() => setIsPanMode(!isPanMode)}
+                          className={clsx(
+                            "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95 text-[9px]",
+                            (isPanMode || isSpacePressed) ? "bg-zinc-100 text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          <Hand className="w-3.5 h-3.5" />
+                          Pan
+                        </button>
+                      </div>
+
+                      {/* Zoom Controls */}
+                      <div className="flex items-center gap-2 bg-black/40 p-2 rounded-xl border border-white/5">
+                         <button onClick={() => setZoom(prev => Math.max(0.5, prev - 0.2))} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white">
+                           <ZoomOut className="w-4 h-4" />
+                         </button>
+                         <div className="flex-1 text-center text-[10px] font-black text-indigo-400 tabular-nums">
+                           {Math.round(zoom * 100)}%
+                         </div>
+                         <button onClick={() => setZoom(prev => Math.min(10, prev + 0.2))} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white">
+                           <ZoomIn className="w-4 h-4" />
+                         </button>
+                         <button onClick={() => { setZoom(1); setPanOffset({x:0, y:0}); }} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white" title="Reset Zoom">
+                           <Maximize className="w-4 h-4" />
+                         </button>
+                      </div>
+
+                      <div className="space-y-6 pt-2 h-40">
+                      {isPanMode || isSpacePressed ? (
+                        <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                           <div className="flex flex-col gap-1">
+                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold text-center">Pan Mode Active</span>
+                            <p className="text-[10px] text-zinc-500 text-center">Seret gambar untuk berpindah posisi.</p>
+                          </div>
+                        </div>
+                      ) : cleanupTool === 'WAND' ? (
+                        <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Wand Settings</span>
+                            <p className="text-[10px] text-zinc-500">Klik warna untuk menghapus area besar.</p>
+                          </div>
+                          <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-4">
+                            <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
+                              <span>Toleransi Warna</span>
+                              <span>{wandTolerance}%</span>
+                            </div>
+                            <input type="range" min="1" max="100" value={wandTolerance} onChange={(e) => setWandTolerance(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Eraser Settings</span>
+                            <p className="text-[10px] text-zinc-500">Seret untuk menghapus detail manual.</p>
+                          </div>
+                          <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-4">
+                            <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
+                              <span>Ukuran Kuas</span>
+                              <span>{brushSize}px</span>
+                            </div>
+                            <input type="range" min="1" max="100" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                          </div>
+                        </div>
+                      )}
+                      </div>
+                    </div>
+                  )}
+
+                  {studioMode === 'CROP' && (
+                    <div className="space-y-6">
+                       <div className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Aspect Ratio</span>
+                        <p className="text-[10px] text-zinc-500">Sesuaikan bentuk potongan gambar.</p>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         {[
@@ -969,7 +1519,8 @@ export default function Home() {
                           { label: "1:1 Square", val: 1 },
                           { label: "4:5 Portrait", val: 0.8 },
                           { label: "9:16 Story", val: 0.5625 },
-                          { label: "16:9 Wide", val: 1.777 },
+                          { label: "3:2 Landscape", val: 1.5 },
+                          { label: "16:9 Cinematic", val: 1.7777777777777777 },
                         ].map((ratio) => (
                           <button
                             key={ratio.label}
@@ -981,18 +1532,16 @@ export default function Home() {
                                    let nC: Crop;
                                    if (ratio.val) {
                                      nC = centerCrop(makeAspectCrop({ unit: '%', [imgA > ratio.val ? 'height' : 'width']: 100 }, ratio.val, dW, dH), dW, dH);
-                                   } else {
-                                     nC = { unit: '%', x: 0, y: 0, width: 100, height: 100 };
-                                   }
+                                   } else { nC = { unit: '%', x: 0, y: 0, width: 100, height: 100 }; }
                                    setCrop(nC);
                                 }
                             }}
                             className={clsx(
-                              "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center border transition-all active:scale-95",
+                              "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center border transition-all active:scale-95 text-[10px]",
                               cropAspect === ratio.val ? "bg-white text-zinc-950 border-white shadow-lg" : "bg-zinc-800 text-zinc-400 border-white/5"
                             )}
                           >
-                            <span className="text-[10px] font-black">{ratio.label}</span>
+                            {ratio.label}
                           </button>
                         ))}
                       </div>
@@ -1000,20 +1549,14 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
-                  <button
-                    onClick={refiningIdx ? handleSaveRefine : handleSaveCrop}
-                    disabled={isCropping || isRefining || (!completedCrop && !refiningIdx)}
-                    className="w-full py-4 bg-indigo-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-indigo-400 shadow-xl shadow-indigo-500/20 active:scale-95 transition-all text-sm uppercase"
+                <div className="pt-6 border-t border-white/5">
+                  <button 
+                    onClick={studioMode === 'CROP' ? handleSaveCrop : handleSaveRefine}
+                    disabled={isCropping || isRefining || isCleaning}
+                    className="w-full py-4 bg-indigo-500 hover:bg-indigo-400 text-white rounded-2xl flex items-center justify-center gap-2 font-black uppercase tracking-widest shadow-lg shadow-indigo-500/30 transition-all active:scale-95 disabled:opacity-50"
                   >
-                    {(isCropping || isRefining) ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
-                    {(isCropping || isRefining) ? "Sedang Proses..." : refiningIdx ? "TERAPKAN KIKISAN" : "SIMPAN POTONGAN"}
-                  </button>
-                  <button
-                    onClick={() => { setCroppingIdx(null); setRefiningIdx(null); }}
-                    className="w-full py-3 bg-zinc-800 text-zinc-500 rounded-2xl font-bold border border-white/5 hover:bg-zinc-700 hover:text-white transition-all text-xs"
-                  >
-                    Batal
+                    {(isCropping || isRefining || isCleaning) ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
+                    Simpan Perubahan
                   </button>
                 </div>
               </div>
@@ -1024,23 +1567,41 @@ export default function Home() {
     </div>
   );
 }
-
 function StickerCard({ img, onUpscale, onPreview, onRefine, globalLock, upscaleCooldownTime }: {
   img: any,
   onUpscale: () => void,
   onPreview: () => void,
-  onRefine: () => void,
+  onRefine: (initialMode?: 'REFINE' | 'CLEANUP') => void,
   globalLock: boolean,
   upscaleCooldownTime: number
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   
   return (
     <div 
-      className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group overflow-hidden animate-in zoom-in-50 duration-500 cursor-pointer"
+      className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group animate-in zoom-in-50 duration-500 cursor-pointer"
       onClick={() => setShowMenu(!showMenu)}
     >
-      {/* Visual Hint for Mobile */}
+      <div className="absolute inset-0 overflow-hidden rounded-xl z-0">
+        {img.upscaledUrl && !showMenu && (
+          <div className="absolute top-2 left-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg z-20">
+            4K HD
+          </div>
+        )}
+        {img.isUpscaling && (
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-30 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="w-10 h-10 animate-spin text-pink-500" />
+            <p className="text-white text-sm font-semibold animate-pulse">Menajamkan 4K...</p>
+          </div>
+        )}
+        <img 
+          src={img.upscaledUrl || img.url} 
+          alt="Sticker" 
+          className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110" 
+        />
+      </div>
+
       <div className={clsx(
         "absolute top-3 right-3 text-white/40 sm:hidden transition-opacity z-20",
         showMenu ? "opacity-0" : "opacity-100"
@@ -1048,33 +1609,16 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, globalLock, upscaleC
         <MoreVertical className="w-5 h-5 drop-shadow-lg" />
       </div>
 
-      {/* 4K Badge - Hide when menu is active for clarity */}
-      {img.upscaledUrl && !showMenu && (
-        <div className="absolute top-2 left-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg z-20">
-          4K HD
-        </div>
-      )}
-      
-      {/* Loading Overlay */}
-      {img.isUpscaling && (
-        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-30 flex flex-col items-center justify-center gap-3">
-          <Loader2 className="w-10 h-10 animate-spin text-pink-500" />
-          <p className="text-white text-sm font-semibold animate-pulse">Menajamkan 4K...</p>
-        </div>
-      )}
-
-      {/* Hover/Tap Overlay */}
       <div className={clsx(
-        "absolute inset-0 bg-zinc-950/90 backdrop-blur-md transition-all duration-300 z-10 flex flex-col items-center justify-center pt-10 pb-4 px-4 gap-2",
+        "absolute -inset-[1.5px] bg-zinc-950 transition-all duration-300 z-10 flex flex-col items-center justify-center pt-10 pb-4 px-4 gap-2 rounded-xl border border-white/20 shadow-2xl overflow-visible",
         img.isUpscaling ? "hidden" : showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
       )}>
-        {/* Dedicated Close Button for Mobile Overlay - Styled better */}
         {showMenu && (
           <button 
             onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
-            className="absolute top-2 right-2 p-1 bg-white/20 hover:bg-white/30 backdrop-blur-xl rounded-full text-white sm:hidden z-30 border border-white/10"
+            className="absolute top-2 right-2 p-1.5 bg-white/20 hover:bg-white/30 backdrop-blur-xl rounded-full text-white sm:hidden z-30 border border-white/10 transition-transform active:scale-90"
           >
-            <X className="w-2.5 h-2.5" />
+            <X className="w-3.5 h-3.5" />
           </button>
         )}
 
@@ -1086,7 +1630,7 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, globalLock, upscaleC
               className="w-full py-3 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg border border-white/10 disabled:opacity-40 transition-all active:scale-95 flex flex-col items-center justify-center gap-1"
             >
               <Sparkles className="w-4 h-4" />
-              <span className="text-[10px] font-bold">{globalLock ? `${upscaleCooldownTime}s` : <><span className="sm:hidden">Upscale</span><span className="hidden sm:inline">Upscale ke 4K</span></>}</span>
+              <span className="text-[10px] font-bold">{globalLock ? `${upscaleCooldownTime}s` : <span className="hidden sm:inline">Upscale ke 4K</span>}</span>
             </button>
           ) : (
             <div className="w-full py-3 bg-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold border border-emerald-500/30 flex flex-col items-center justify-center gap-1">
@@ -1096,25 +1640,33 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, globalLock, upscaleC
         </div>
 
         <div className="flex w-full gap-2 border-t border-white/10 pt-3 mt-1">
-          <button 
-            onClick={(e) => { e.stopPropagation(); onRefine(); }} 
-            className="flex-1 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-lg flex flex-col items-center justify-center transition-colors" 
-            title="Refine Edge"
-          >
-            <Sparkles className="w-3 h-3" />
-            <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5">Kikis</span>
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); onPreview(); }} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex justify-center transition-colors" title="View"><Maximize className="w-3.5 h-3.5" /></button>
-          <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, "sticker.png"); }} className="flex-1 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex justify-center transition-colors" title="Save"><Download className="w-3.5 h-3.5" /></button>
+          <button onClick={(e) => { e.stopPropagation(); onPreview(); }} className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="View"><Maximize className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">PREVIEW</span></button>
+          <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, "sticker.png"); }} className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Save"><Download className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline">Download</span></button>
+          <div className="relative flex-1">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} 
+              className="w-full py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-lg flex flex-col items-center justify-center transition-colors group/tools" 
+              title="Studio Tools"
+            >
+              <Wrench className="w-3.5 h-3.5" />
+              <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5 hidden sm:inline">Tools</span>
+            </button>
+            <div className={clsx(
+              "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 bg-zinc-950/90 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] transition-all p-1.5 flex flex-col gap-1 z-[60]",
+              showTools ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none group-hover/tools:opacity-100 group-hover/tools:scale-100 group-hover/tools:pointer-events-auto"
+            )}>
+               <div className="absolute top-full left-0 right-0 h-4" />
+               <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
+               <button 
+                  onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('CLEANUP'); }} 
+                  className="w-full py-2 px-3 hover:bg-indigo-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-indigo-400 border border-transparent hover:border-indigo-500/30 transition-all"
+               >
+                  <Wand2 className="w-4 h-4" /> Cleanup
+                </button>
+            </div>
+          </div>
         </div>
       </div>
-
-      {/* Main Image */}
-      <img 
-        src={img.upscaledUrl || img.url} 
-        alt="Sticker" 
-        className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110" 
-      />
     </div>
   );
 }
@@ -1125,7 +1677,7 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine,
   onManualAction: (idx: number, type: "remove_bg" | "upscale") => void, 
   onCropOpen: (idx: number) => void, 
   onPreview: (url: string) => void, 
-  onRefine: (idx: number) => void,
+  onRefine: (idx: number, initialMode?: 'REFINE' | 'CLEANUP') => void,
   onDelete: (id: string) => void, 
   globalLock: boolean, 
   upscaleCooldownTime: number, 
@@ -1133,13 +1685,32 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine,
   isGenerating: boolean 
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [showTools, setShowTools] = useState(false);
 
   return (
     <div 
-      className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group overflow-hidden animate-in fade-in duration-300 cursor-pointer"
+      className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group animate-in fade-in duration-300 cursor-pointer"
       onClick={() => setShowMenu(!showMenu)}
     >
-      {/* Visual Hint for Mobile */}
+       <div className="absolute inset-0 overflow-hidden rounded-xl z-0">
+          {!showMenu && (
+            <div className="absolute top-2 left-2 flex gap-1 z-20">
+               {img.url !== img.originalUrl && <div className="bg-indigo-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">B-FREE</div>}
+               {img.upscaledUrl && <div className="bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">4K</div>}
+            </div>
+          )}
+          {(img.isProcessing || img.isUpscaling) && (
+             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-30 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
+             </div>
+          )}
+          <img 
+            src={img.upscaledUrl || img.url} 
+            alt="Manual" 
+            className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" 
+          />
+       </div>
+
       <div className={clsx(
         "absolute top-3 right-3 text-white/40 sm:hidden transition-opacity z-20",
         showMenu ? "opacity-0" : "opacity-100"
@@ -1147,53 +1718,28 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine,
         <MoreVertical className="w-5 h-5 drop-shadow-lg" />
       </div>
 
-       {/* Status Badges - Hide when menu is active */}
-       {!showMenu && (
-         <div className="absolute top-2 left-2 flex gap-1 z-20">
-            {img.url !== img.originalUrl && <div className="bg-indigo-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">B-FREE</div>}
-            {img.upscaledUrl && <div className="bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">4K</div>}
-         </div>
-       )}
-       
-       {/* Centered Processing Loader */}
-       {(img.isProcessing || img.isUpscaling) && (
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-30 flex items-center justify-center">
-             <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
-          </div>
-       )}
-
        <div className={clsx(
-         "absolute inset-0 bg-zinc-950/90 backdrop-blur-md transition-all duration-300 z-10 flex flex-col items-center justify-center pt-8 pb-4 px-4 gap-3",
+         "absolute -inset-[1.5px] bg-zinc-950 transition-all duration-300 z-10 flex flex-col items-center justify-center pt-8 pb-4 px-4 gap-3 rounded-xl border border-white/20 shadow-2xl overflow-visible",
          (img.isProcessing || img.isUpscaling) ? "hidden" : showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
        )}>
-          {/* Dedicated Close Button for Mobile Overlay - Styled better */}
           {showMenu && (
             <button 
               onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
-              className="absolute top-2 right-2 p-1 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full text-white/60 sm:hidden z-30 border border-white/10"
-            >
-              <X className="w-3 h-3" />
+               className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full text-white/60 sm:hidden z-30 border border-white/10"
+             >
+               <X className="w-3.5 h-3.5" />
             </button>
           )}
 
-          <div className="grid grid-cols-4 gap-2 w-full">
+          <div className="grid grid-cols-3 gap-2 w-full">
              <button 
                onClick={(e) => { e.stopPropagation(); onManualAction(idx, "remove_bg"); }} 
-               disabled={img.isProcessing || img.url !== img.originalUrl || globalLock} 
+               disabled={img.isProcessing || img.isBackgroundRemoved || globalLock} 
                className="py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 disabled:opacity-40 transition-colors"
                title="Remove BG"
              >
                 <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">BG</span>
-             </button>
-             <button 
-               onClick={(e) => { e.stopPropagation(); onRefine(idx); }} 
-               disabled={img.isProcessing || img.isUpscaling} 
-               className="py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 disabled:opacity-40 transition-colors"
-               title="Refine Edge"
-             >
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">Kikis</span>
+                <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">HAPUS BG</span>
              </button>
              <button 
                onClick={(e) => { e.stopPropagation(); onManualAction(idx, "upscale"); }} 
@@ -1202,32 +1748,44 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine,
                title="Upscale 4K"
              >
                 <Sparkles className="w-4 h-4" />
-                <span className="text-[8px] font-bold hidden sm:inline text-white">4K</span>
+                <span className="text-[8px] font-bold hidden sm:inline text-white text-center">UPSCALE 4K</span>
              </button>
-             <button 
-               onClick={(e) => { e.stopPropagation(); onCropOpen(idx); }} 
-               disabled={img.isProcessing || img.isUpscaling}
-               className="py-2.5 bg-pink-500/20 hover:bg-pink-500/30 text-pink-400 rounded-lg flex flex-col items-center justify-center gap-1 border border-pink-500/30 disabled:opacity-40 transition-colors"
-               title="Crop"
-             >
-                <Scissors className="w-4 h-4" />
-                <span className="text-[8px] font-bold hidden sm:inline">Crop</span>
-             </button>
+             <div className="relative flex-1">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} 
+                  className="w-full h-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 transition-colors group/tools"
+                  title="Studio Tools"
+                >
+                   <Wrench className="w-4 h-4 text-emerald-400" />
+                   <span className="text-[8px] font-bold hidden sm:inline text-zinc-400 uppercase tracking-tighter">Tools</span>
+                </button>
+                <div className={clsx(
+                  "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-36 bg-zinc-950/90 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] transition-all p-2 flex flex-col gap-1.5 z-[60]",
+                  showTools ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none group-hover/tools:opacity-100 group-hover/tools:scale-100 group-hover/tools:pointer-events-auto"
+                )}>
+                  <div className="absolute top-full left-0 right-0 h-4" />
+                  <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onCropOpen(idx); }} className="w-full py-2 px-3 hover:bg-pink-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-pink-400 border border-transparent hover:border-pink-500/30 transition-all"><Scissors className="w-4 h-4" /> Crop</button>
+                  <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine(idx, 'REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
+                  <button 
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      setShowTools(false);
+                      onRefine(idx, 'CLEANUP'); 
+                    }} 
+                    className="w-full py-2 px-3 hover:bg-indigo-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-indigo-400 border border-transparent hover:border-indigo-500/30 transition-all"
+                  >
+                    <Wand2 className="w-4 h-4" /> Cleanup
+                  </button>
+                </div>
+             </div>
           </div>
           
           <div className="flex w-full gap-2 border-t border-white/10 pt-3">
-            <button onClick={(e) => { e.stopPropagation(); onPreview(img.upscaledUrl || img.url); }} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex justify-center transition-colors" title="Preview"><Maximize className="w-4 h-4" /></button>
-            <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, `Sticker_${idx}.png`); }} className="flex-1 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex justify-center transition-colors shadow-inner" title="Download"><Download className="w-4 h-4" /></button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete(img.id); }} className="flex-1 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-lg flex justify-center transition-colors border border-red-500/20" title="Hapus"><Trash2 className="w-4 h-4" /></button>
+            <button onClick={(e) => { e.stopPropagation(); onPreview(img.upscaledUrl || img.url); }} className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Preview"><Maximize className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">VIEW</span></button>
+            <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, `Sticker_${idx}.png`); }} className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-colors shadow-inner px-1" title="Download"><Download className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline">Download</span></button>
+            <button onClick={(e) => { e.stopPropagation(); onDelete(img.id); }} className="flex-1 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-500 rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Delete"><Trash2 className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 uppercase tracking-widest hidden sm:inline">Delete</span></button>
           </div>
        </div>
-
-       {/* Main Image */}
-       <img 
-         src={img.upscaledUrl || img.url} 
-         alt="Manual" 
-         className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" 
-       />
     </div>
   );
 }
