@@ -4,11 +4,11 @@ import path from 'path';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
   try {
-    // path is the array of catch-all segments, e.g., ["outputs", "gen", "file.png"]
-    const filePathSegments = params.path;
+    // v15+ compatibility: params must be awaited
+    const { path: filePathSegments } = await params;
     
     // Security: Only allow access within the outputs directory
     if (filePathSegments[0] !== 'outputs') {
