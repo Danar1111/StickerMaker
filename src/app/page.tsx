@@ -1161,7 +1161,7 @@ export default function Home() {
              <button 
                onClick={() => { setActiveTab("generator"); setStudioTarget(null); setPreviewImage(null); }} 
                disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
-               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
+               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Zap className="w-3.5 h-3.5 md:w-4 h-4" /> 
                <span className="md:hidden">AI</span>
@@ -1170,7 +1170,7 @@ export default function Home() {
              <button 
                onClick={() => { setActiveTab("manual"); setStudioTarget(null); setPreviewImage(null); }} 
                disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
-               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
+               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Upload className="w-3.5 h-3.5 md:w-4 h-4" /> 
                <span className="md:hidden">Tool</span>
@@ -1179,7 +1179,7 @@ export default function Home() {
              <button 
                onClick={() => { setActiveTab("vector"); setStudioTarget(null); setPreviewImage(null); setIsVectorWarningOpen(true); }} 
                disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
-               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap", activeTab === "vector" ? "bg-emerald-500 text-white shadow-lg" : "text-zinc-500")}
+               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "vector" ? "bg-emerald-500 text-white shadow-lg" : "text-zinc-500")}
              > 
                <Shapes className="w-3.5 h-3.5 md:w-4 h-4" /> 
                <span className="md:hidden">Vector</span>
@@ -1197,7 +1197,7 @@ export default function Home() {
                 disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
                 title="Standard Mode (Rapi)"
                 className={clsx(
-                  "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center",
+                  "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed",
                   rembgModel === 'standard' ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-400"
                 )}
               >
@@ -1208,7 +1208,7 @@ export default function Home() {
                 disabled={isGenerating || isManualBatchProcessing || isVectorGenerating || globalUpscaleState !== 'IDLE'}
                 title="Smart Mode (Detail)"
                 className={clsx(
-                  "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center",
+                  "p-2 md:p-2.5 rounded-lg transition-all flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed",
                   rembgModel === 'smart' ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-400"
                 )}
               >
