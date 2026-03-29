@@ -668,7 +668,7 @@ export default function Home() {
         const localPath = await saveFileLocally(bgData.imageUrl, 'gen', undefined, ['rbg']);
 
         const newSticker = { url: localPath };
-        setGeneratedImages(prev => [...prev, newSticker]); 
+        setGeneratedImages(prev => [newSticker, ...prev]); 
         setProgress(((i + 1) / batchSize) * 100);
         if (i < batchSize - 1) await new Promise(r => setTimeout(r, 10000));
       }
