@@ -2327,8 +2327,13 @@ function VectorStickerCard({ img, onDelete, onPreview }: {
   onDelete: () => void,
   onPreview: (url: string) => void
 }) {
+  const [showMenu, setShowMenu] = useState(false);
+
   return (
-    <div className="group relative aspect-square rounded-2xl overflow-hidden bg-zinc-900 border border-white/5 hover:border-indigo-500/50 transition-all shadow-xl">
+    <div 
+      className="group relative aspect-square rounded-2xl overflow-hidden bg-zinc-900 border border-white/5 hover:border-indigo-500/50 transition-all shadow-xl cursor-pointer"
+      onClick={() => setShowMenu(!showMenu)}
+    >
        {/* v12.0: Checkered Background for Vector Preview */}
       <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'conic-gradient(#fff 0.25turn, #000 0.25turn 0.5turn, #fff 0.5turn 0.75turn, #000 0.75turn)', backgroundSize: '20px 20px' }} />
       
@@ -2336,13 +2341,20 @@ function VectorStickerCard({ img, onDelete, onPreview }: {
         <img 
           src={img.url} 
           alt="Vector Result" 
-          className="max-w-full max-h-full object-contain drop-shadow-2xl cursor-pointer transition-transform group-hover:scale-105"
-          onClick={() => onPreview(img.url)}
+          className="max-w-full max-h-full object-contain drop-shadow-2xl transition-transform group-hover:scale-105"
+          onClick={(e) => {
+            if (window.innerWidth < 768) {
+              e.stopPropagation();
+              setShowMenu(!showMenu);
+            } else {
+              onPreview(img.url);
+            }
+          }}
           loading="lazy"
         />
       </div>
 
-      <div className="absolute top-2 left-2 flex gap-1">
+      <div className="absolute top-2 left-2 flex gap-1 z-20">
         <div className={clsx(
           "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-tighter",
           img.isPro ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" : "bg-zinc-800 text-zinc-400"
@@ -2351,35 +2363,59 @@ function VectorStickerCard({ img, onDelete, onPreview }: {
         </div>
       </div>
 
-      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-sm">
-        <button 
-          onClick={(e) => { e.stopPropagation(); onPreview(img.url); }}
-          className="w-10 h-10 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95"
-          title="Full Preview"
-        >
-          <Maximize className="w-5 h-5" />
-        </button>
-        <button 
-          onClick={(e) => { 
-            e.stopPropagation(); 
-            saveAs(img.url, `vector_${img.id}.svg`);
-          }}
-          className="w-10 h-10 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95"
-          title="Download SVG"
-        >
-          <Download className="w-5 h-5" />
-        </button>
-        <button 
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="w-10 h-10 bg-red-500/20 hover:bg-red-500/40 text-red-500 rounded-xl flex items-center justify-center transition-all hover:scale-110 active:scale-95"
-          title="Delete"
-        >
-          <Trash2 className="w-5 h-5" />
-        </button>
+      <div className={clsx(
+        "absolute top-3 right-3 text-white/40 sm:hidden transition-opacity z-20",
+        showMenu ? "opacity-0" : "opacity-100"
+      )}>
+        <MoreVertical className="w-5 h-5 drop-shadow-lg" />
       </div>
 
-      <div className="absolute bottom-2 right-2 text-[8px] text-zinc-600 font-mono">
-        {new Date(img.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      <div className={clsx(
+        "absolute inset-0 bg-black/60 transition-opacity flex flex-col items-center justify-center pt-8 pb-4 px-4 gap-3 backdrop-blur-sm z-10",
+        showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+      )}>
+        {showMenu && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
+            className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full text-white/60 sm:hidden z-30 border border-white/10"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        <div className="flex w-full gap-2">
+          <button 
+            onClick={(e) => { e.stopPropagation(); onPreview(img.url); }}
+            className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-all hover:scale-105 active:scale-95 px-1 border border-white/5"
+            title="Preview"
+          >
+            <Maximize className="w-4 h-4" />
+            <span className="text-[7px] font-bold mt-0.5 hidden sm:inline">VIEW</span>
+          </button>
+          <button 
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              saveAs(img.url, `vector_${img.id}.svg`);
+            }}
+            className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-all hover:scale-105 active:scale-95 px-1 border border-emerald-500/20"
+            title="Download SVG"
+          >
+            <Download className="w-4 h-4" />
+            <span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline text-white">SAVE</span>
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="flex-1 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-500 rounded-lg flex flex-col items-center justify-center transition-all hover:scale-105 active:scale-95 px-1 border border-red-500/20"
+            title="Delete"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span className="text-[7px] font-bold mt-0.5 uppercase tracking-widest hidden sm:inline">DELETE</span>
+          </button>
+        </div>
+
+        <div className="absolute bottom-2 right-2 text-[8px] text-zinc-600 font-mono">
+          {new Date(img.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </div>
       </div>
     </div>
   );
