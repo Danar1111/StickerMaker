@@ -16,11 +16,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { imageUrl, category, deleteOldPath } = await req.json();
+    const { imageUrl, category, deleteOldPath, tags } = await req.json();
 
     if (!imageUrl || !category) {
       return NextResponse.json({ error: "Missing imageUrl or category" }, { status: 400 });
     }
+
+    // v12.6: Support metadata tags (rbg, 4k) in filename
+    const tagString = (tags && Array.isArray(tags)) ? tags.join('_') + '_' : '';
 
     // 1. Get the image data
     let imageBuffer: Buffer;
@@ -39,7 +42,7 @@ export async function POST(req: NextRequest) {
     if (!imageUrl.startsWith('data:image/')) {
         ext = imageUrl.split('.').pop()?.split('?')[0] || 'png';
     }
-    const filename = `${category}_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+    const filename = `${category}_${tagString}${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
     const targetDir = path.join(process.cwd(), 'public', 'outputs', category);
     const targetPath = path.join(targetDir, filename);
 
@@ -112,10 +115,17 @@ export async function GET(req: NextRequest) {
                 files.map(async (file) => {
                     const filePath = path.join(dirPath, file);
                     const stats = await fs.stat(filePath);
+                    
+                    // Parse Tags from filename (e.g. manual_rbg_4k_timestamp...)
+                    const is4k = file.includes('_4k_');
+                    const isRbg = file.includes('_rbg_');
+
                     return {
                         name: file,
                         url: `/outputs/${cat}/${file}`,
-                        mtime: stats.mtimeMs
+                        mtime: stats.mtimeMs,
+                        is4k,
+                        isRbg
                     };
                 })
             );
@@ -123,7 +133,12 @@ export async function GET(req: NextRequest) {
             // Sort by mtime DESC (Newest First)
             results[cat] = fileDetails
                 .sort((a, b) => b.mtime - a.mtime)
-                .map(f => ({ url: f.url, mtime: f.mtime }));
+                .map(f => ({ 
+                  url: f.url, 
+                  mtime: f.mtime,
+                  is4k: f.is4k,
+                  isRbg: f.isRbg
+                }));
         }
 
         return NextResponse.json(results);

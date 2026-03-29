@@ -315,7 +315,7 @@ export default function Home() {
       if (data.gen) {
         setGeneratedImages(data.gen.map((item: any) => ({
           url: item.url,
-          // Note: we just show the final version stored on disk
+          upscaledUrl: item.is4k ? item.url : undefined
         })));
       }
 
@@ -323,11 +323,12 @@ export default function Home() {
       if (data.manual) {
         setManualImages(data.manual.map((item: any) => ({
           id: item.url,
-          originalUrl: item.url,
+          originalUrl: item.isRbg ? "B-FREE-MARKER" : item.url, // Trigger B-FREE icon if tagged
           url: item.url,
           isProcessing: false,
           isUpscaling: false,
-          isBackgroundRemoved: false 
+          upscaledUrl: item.is4k ? item.url : undefined,
+          isBackgroundRemoved: item.isRbg
         })));
       }
 
@@ -593,12 +594,12 @@ export default function Home() {
   };
 
   // --- STORAGE HELPERS ---
-  const saveFileLocally = async (url: string, category: 'gen' | 'manual' | 'vector', oldPath?: string) => {
+  const saveFileLocally = async (url: string, category: 'gen' | 'manual' | 'vector', oldPath?: string, tags?: string[]) => {
     try {
       const res = await fetch('/api/storage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
-        body: JSON.stringify({ imageUrl: url, category, deleteOldPath: oldPath }),
+        body: JSON.stringify({ imageUrl: url, category, deleteOldPath: oldPath, tags }),
       });
       const data = await res.json();
       return `/api/storage/view${data.localUrl}`;
@@ -664,7 +665,7 @@ export default function Home() {
 
         // v12.3: Save to local VPS immediately
         setProgressText(`Menyimpan ke VPS [${i + 1}/${batchSize}]...`);
-        const localPath = await saveFileLocally(bgData.imageUrl, 'gen');
+        const localPath = await saveFileLocally(bgData.imageUrl, 'gen', undefined, ['rbg']);
 
         const newSticker = { url: localPath };
         setGeneratedImages(prev => [...prev, newSticker]); 
@@ -778,7 +779,7 @@ export default function Home() {
 
        // v12.3: Save Upscaled result to VPS (replace old if exists)
        setProgressText(`Storing 4K local copy...`);
-       const localPath = await saveFileLocally(data.imageUrl, 'gen', newData[index].url);
+       const localPath = await saveFileLocally(data.imageUrl, 'gen', newData[index].url, ['4k']);
        
        newData[index].upscaledUrl = localPath;
        newData[index].url = localPath; // Auto-promote to new main URL if upscaled
@@ -877,7 +878,9 @@ export default function Home() {
       );
       
       // v12.4: Save Studio result to VPS and clean up old file
-      const localUrl = await saveFileLocally(croppedImage, tab === 'gen' ? 'gen' : 'manual', target.url);
+      const isManualRbg = tab === 'manual' && (target as any).isBackgroundRemoved;
+      const tags = tab === 'gen' ? ['rbg'] : (isManualRbg ? ['rbg'] : undefined);
+      const localUrl = await saveFileLocally(croppedImage, tab === 'gen' ? 'gen' : 'manual', target.url, tags);
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -924,7 +927,7 @@ export default function Home() {
       const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       
       // v12.4: Save Cleanup result to VPS and clean up old file
-      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url);
+      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, ['rbg']);
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -984,7 +987,7 @@ export default function Home() {
       
       const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       // v12.4: Save Refinement result to VPS and clean up old file
-      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url);
+      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, ['rbg']);
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -1231,7 +1234,12 @@ export default function Home() {
         if (!res.ok) throw new Error(data.error);
 
         // v12.4: Core replacement logic - upscale replaces the current active image (url)
-        const localPath = await saveFileLocally(data.imageUrl, 'manual', type === 'remove_bg' ? target.url : (target.upscaledUrl || target.url));
+        const localPath = await saveFileLocally(
+          data.imageUrl, 
+          'manual', 
+          type === 'remove_bg' ? target.url : (target.upscaledUrl || target.url),
+          [type === 'remove_bg' ? 'rbg' : '4k']
+        );
 
         if (type === "remove_bg") {
           newImages[idx].url = localPath;
@@ -1284,7 +1292,7 @@ export default function Home() {
               const data = await res.json();
               if (res.ok) {
                 // v12.4: Save Batch Rembg to VPS
-                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url);
+                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url, ['rbg']);
 
                 setManualImages(prev => {
                   const updated = [...prev];
@@ -1306,7 +1314,7 @@ export default function Home() {
               const data = await res.json();
               if (res.ok) {
                 // v12.4: Core replacement logic - upscale replaces current image in batch mode
-                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl || img.url);
+                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl || img.url, ['4k']);
 
                 setManualImages(prev => {
                   const updated = [...prev];
