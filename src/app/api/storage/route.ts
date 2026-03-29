@@ -116,16 +116,18 @@ export async function GET(req: NextRequest) {
                     const filePath = path.join(dirPath, file);
                     const stats = await fs.stat(filePath);
                     
-                    // Parse Tags from filename (e.g. manual_rbg_4k_timestamp...)
+                    // Parse Tags from filename (v12.8: Unified Pro/4K/RBG Support)
                     const is4k = file.includes('_4k_');
                     const isRbg = file.includes('_rbg_');
+                    const isPro = file.includes('_pro_');
 
                     return {
                         name: file,
                         url: `/api/storage/view/outputs/${cat}/${file}`,
                         mtime: stats.mtimeMs,
                         is4k,
-                        isRbg
+                        isRbg,
+                        isPro
                     };
                 })
             );
@@ -137,7 +139,8 @@ export async function GET(req: NextRequest) {
                   url: f.url, 
                   mtime: f.mtime,
                   is4k: f.is4k,
-                  isRbg: f.isRbg
+                  isRbg: f.isRbg,
+                  isPro: f.isPro
                 }));
         }
 

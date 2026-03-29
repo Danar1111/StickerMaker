@@ -338,7 +338,7 @@ export default function Home() {
           id: item.url,
           url: item.url,
           timestamp: item.mtime,
-          isPro: false 
+          isPro: item.isPro // Sync Pro status from VPS filename
         })));
       }
     } catch (err) {
@@ -708,7 +708,7 @@ export default function Home() {
 
         // v12.3: Save Vector result to VPS
         setProgressText(`Storing Vector [${i + 1}/${vectorBatchSize}]...`);
-        const localPath = await saveFileLocally(data.imageUrl, 'vector');
+        const localPath = await saveFileLocally(data.imageUrl, 'vector', undefined, isVectorPro ? ['pro'] : undefined);
         
         results.push({
           id: Math.random().toString(36).substr(2, 9),
