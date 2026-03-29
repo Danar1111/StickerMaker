@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
 
                     return {
                         name: file,
-                        url: `/outputs/${cat}/${file}`,
+                        url: `/api/storage/view/outputs/${cat}/${file}`,
                         mtime: stats.mtimeMs,
                         is4k,
                         isRbg
