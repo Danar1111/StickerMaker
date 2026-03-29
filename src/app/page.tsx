@@ -1,16 +1,16 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { 
-  Wand2, 
-  Image as ImageIcon, 
-  Sparkles, 
-  Download, 
-  Loader2, 
-  Trash2, 
-  Scissors, 
-  ExternalLink, 
-  X, 
+import {
+  Wand2,
+  Image as ImageIcon,
+  Sparkles,
+  Download,
+  Loader2,
+  Trash2,
+  Scissors,
+  ExternalLink,
+  X,
   ShieldCheck,
   Monitor,
   MoreVertical,
@@ -71,29 +71,29 @@ const VECTOR_PIN = process.env.NEXT_PUBLIC_VECTOR_STUDIO_PIN || "SVGVIP";
 
 // Helper to get cropped image as data URL
 async function getCroppedImg(image: HTMLImageElement, pixelCrop: PixelCrop): Promise<string> {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
 
-    if (!ctx) return "";
+  if (!ctx) return "";
 
-    // Set canvas dimensions to requested pixel size
-    canvas.width = pixelCrop.width;
-    canvas.height = pixelCrop.height;
+  // Set canvas dimensions to requested pixel size
+  canvas.width = pixelCrop.width;
+  canvas.height = pixelCrop.height;
 
-    // v11.1: Pixel-Perfect Sampling
-    ctx.drawImage(
-      image,
-      pixelCrop.x,
-      pixelCrop.y,
-      pixelCrop.width,
-      pixelCrop.height,
-      0,
-      0,
-      pixelCrop.width,
-      pixelCrop.height
-    );
+  // v11.1: Pixel-Perfect Sampling
+  ctx.drawImage(
+    image,
+    pixelCrop.x,
+    pixelCrop.y,
+    pixelCrop.width,
+    pixelCrop.height,
+    0,
+    0,
+    pixelCrop.width,
+    pixelCrop.height
+  );
 
-    return canvas.toDataURL('image/png');
+  return canvas.toDataURL('image/png');
 }
 
 // --- INDEXED DB STORAGE MANAGER (v12.2) ---
@@ -152,7 +152,7 @@ async function refineAlpha(image: HTMLImageElement, amount: number): Promise<str
   maskCanvas.height = height;
   const mCtx = maskCanvas.getContext('2d');
   if (!mCtx) return image.src;
-  
+
   mCtx.drawImage(image, 0, 0);
   mCtx.globalCompositeOperation = 'source-in';
   mCtx.fillStyle = 'white';
@@ -164,7 +164,7 @@ async function refineAlpha(image: HTMLImageElement, amount: number): Promise<str
   blurCanvas.height = height;
   const bCtx = blurCanvas.getContext('2d');
   if (!bCtx) return image.src;
-  
+
   // The magic ratio: blur radius controls the softness of erosion
   bCtx.filter = `blur(${amount * 0.8}px)`;
   bCtx.drawImage(maskCanvas, 0, 0);
@@ -172,16 +172,16 @@ async function refineAlpha(image: HTMLImageElement, amount: number): Promise<str
   // 3. Sigmoid Thresholding Pass (Anti-Aliased Erosion)
   const imageData = bCtx.getImageData(0, 0, width, height);
   const data = imageData.data;
-  
+
   // Higher threshold = more erosion. 
   // We use a soft-sigmoid to preserve anti-aliasing.
-  const threshold = 160; 
-  const softness = 40; 
-  
+  const threshold = 160;
+  const softness = 40;
+
   for (let i = 3; i < data.length; i += 4) {
     const alpha = data[i];
     if (alpha === 0) continue;
-    
+
     // Smoothstep/Sigmoid mapping
     const v = (alpha - threshold) / softness;
     data[i] = Math.max(0, Math.min(255, v * 255));
@@ -210,14 +210,16 @@ export default function Home() {
   const [isVectorWarningOpen, setIsVectorWarningOpen] = useState(false);
   const [vectorPinInput, setVectorPinInput] = useState("");
   const [isVectorAuthenticated, setIsVectorAuthenticated] = useState(false);
-  
+
   // Vector Mode State (v12.0)
   const [vectorPrompt, setVectorPrompt] = useState("");
   const [vectorStyle, setVectorStyle] = useState(VECTOR_STYLES[0]);
   const [vectorBatchSize, setVectorBatchSize] = useState(1);
+  const [vectorAspectRatio, setVectorAspectRatio] = useState("1:1");
+  const [isNoBackground, setIsNoBackground] = useState(false);
   const [isVectorPro, setIsVectorPro] = useState(false);
   const [isVectorGenerating, setIsVectorGenerating] = useState(false);
-  const [vectorImages, setVectorImages] = useState<{id: string, url: string, timestamp: number, isPro: boolean}[]>([]);
+  const [vectorImages, setVectorImages] = useState<{ id: string, url: string, timestamp: number, isPro: boolean }[]>([]);
   const [isProSwitchModalOpen, setIsProSwitchModalOpen] = useState(false);
 
   // Upscale Rate Limiting State
@@ -230,17 +232,17 @@ export default function Home() {
   const [mode, setMode] = useState("premium");
   const [artStyle, setArtStyle] = useState("3D Render");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedImages, setGeneratedImages] = useState<{url: string, isUpscaling?: boolean, upscaledUrl?: string}[]>([]);
+  const [generatedImages, setGeneratedImages] = useState<{ url: string, isUpscaling?: boolean, upscaledUrl?: string }[]>([]);
   const [progress, setProgress] = useState(0);
   const [progressText, setProgressText] = useState("");
 
   // Manual Mode State (BATCH ENABLED)
   const [manualImages, setManualImages] = useState<{
-    id: string, 
-    originalUrl: string, 
-    url: string, 
-    isProcessing: boolean, 
-    isUpscaling: boolean, 
+    id: string,
+    originalUrl: string,
+    url: string,
+    isProcessing: boolean,
+    isUpscaling: boolean,
     upscaledUrl?: string,
     isBackgroundRemoved?: boolean
   }[]>([]);
@@ -257,7 +259,7 @@ export default function Home() {
   const isGloballyLocked = isGenerating || isManualBatchProcessing || isSyncingToVPS || isVectorGenerating || globalUpscaleState !== 'IDLE' || isAnyGenProcessing || isAnyManualProcessing;
 
   // Studio State (v11.1)
-  const [studioTarget, setStudioTarget] = useState<{idx: number, tab: 'gen'|'manual'} | null>(null);
+  const [studioTarget, setStudioTarget] = useState<{ idx: number, tab: 'gen' | 'manual' } | null>(null);
   const [refineAmount, setRefineAmount] = useState(2);
   const [isRefining, setIsRefining] = useState(false);
   const [refinedPreviewUrl, setRefinedPreviewUrl] = useState<string | null>(null);
@@ -287,7 +289,7 @@ export default function Home() {
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  
+
   // v11.1.68: Pure Studio Session Meta-State
   const stableStudioUrl = useMemo(() => {
     if (!studioTarget) return "";
@@ -299,7 +301,7 @@ export default function Home() {
     // Append a stable timestamp for the current sticker to break CORS cache per session
     return `${url}?t=studio-${studioTarget.tab}-${studioTarget.idx}`;
   }, [studioTarget, generatedImages, manualImages]);
-  
+
   const syncGalleryWithVPS = async (pin?: string) => {
     const activePin = pin || sessionPin;
     if (!activePin) return;
@@ -310,7 +312,7 @@ export default function Home() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      
+
       // Sync AI Generator (gen)
       if (data.gen) {
         setGeneratedImages(data.gen.map((item: any) => ({
@@ -352,11 +354,11 @@ export default function Home() {
     setIsClient(true);
     const savedPin = localStorage.getItem("admin_pin");
     if (savedPin) {
-       setSessionPin(savedPin);
-       setIsAuthenticated(true);
-       syncGalleryWithVPS(savedPin); // Initial sync on mount if authed
+      setSessionPin(savedPin);
+      setIsAuthenticated(true);
+      syncGalleryWithVPS(savedPin); // Initial sync on mount if authed
     } else {
-       setIsAuthenticated(false);
+      setIsAuthenticated(false);
     }
 
     // Load AI Generator History from DB
@@ -365,7 +367,7 @@ export default function Home() {
       else {
         // Fallback migration from localStorage
         const legacy = localStorage.getItem("sticker_gen_v1");
-        if (legacy) try { setGeneratedImages(JSON.parse(legacy)); localStorage.removeItem("sticker_gen_v1"); } catch(e){}
+        if (legacy) try { setGeneratedImages(JSON.parse(legacy)); localStorage.removeItem("sticker_gen_v1"); } catch (e) { }
       }
     });
 
@@ -375,14 +377,14 @@ export default function Home() {
       else {
         // Fallback migration
         const legacy = localStorage.getItem("sticker_manual_v1");
-        if (legacy) try { setManualImages(JSON.parse(legacy)); localStorage.removeItem("sticker_manual_v1"); } catch(e){}
+        if (legacy) try { setManualImages(JSON.parse(legacy)); localStorage.removeItem("sticker_manual_v1"); } catch (e) { }
       }
     });
 
     // Load Vector Studio History (Stay on localStorage as it's safe and small)
     const savedVector = localStorage.getItem("sticker_vector_v1");
     if (savedVector) {
-      try { setVectorImages(JSON.parse(savedVector)); } catch(e) { console.error(e); }
+      try { setVectorImages(JSON.parse(savedVector)); } catch (e) { console.error(e); }
     }
   }, []);
 
@@ -426,15 +428,15 @@ export default function Home() {
       }
 
       if (studioMode !== 'CLEANUP') return;
-      
+
       const isZ = e.key.toLowerCase() === 'z';
       const isY = e.key.toLowerCase() === 'y';
       const isCtrl = e.ctrlKey || e.metaKey;
 
       // v12.2: Only intercept Space if Studio is actually OPEN
       if (e.code === 'Space' && studioTarget !== null) {
-          setIsSpacePressed(true);
-          e.preventDefault();
+        setIsSpacePressed(true);
+        e.preventDefault();
       }
 
       if (isCtrl && isZ) {
@@ -446,11 +448,11 @@ export default function Home() {
         e.preventDefault();
       }
     };
-    
+
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') setIsSpacePressed(false);
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => {
@@ -462,7 +464,7 @@ export default function Home() {
   const handleWheel = (e: React.WheelEvent) => {
     if (studioMode !== 'CLEANUP') return;
     e.preventDefault();
-    
+
     if (e.altKey && cleanupTool === 'ERASER') {
       // Alt + Scroll = Adjust Brush Size
       const step = e.deltaY > 0 ? -2 : 2;
@@ -491,12 +493,12 @@ export default function Home() {
       setRefinedPreviewUrl(null);
       return;
     }
-    
+
     setIsRefining(true);
     const timeout = setTimeout(async () => {
       try {
         if (!stableStudioUrl) return;
-        
+
         // v11.1.75: Always refine from ORIGINAL to avoid cumulative processing
         const img = new Image();
         img.crossOrigin = "anonymous";
@@ -524,7 +526,7 @@ export default function Home() {
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      
+
       const target = (studioTarget.tab === 'gen' ? generatedImages : manualImages)[studioTarget.idx];
       const img = new Image();
       img.onload = () => {
@@ -549,22 +551,22 @@ export default function Home() {
     setIsVerifying(true);
     setAuthError("");
     try {
-        const res = await fetch('/api/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-admin-pin': pinInput },
-            body: JSON.stringify({ action: 'verify_pin' })
-        });
-        if (!res.ok) {
-            setAuthError("PIN Salah!");
-            setIsVerifying(false);
-            return;
-        }
-        localStorage.setItem("admin_pin", pinInput);
-        setSessionPin(pinInput);
-        setIsAuthenticated(true);
-        syncGalleryWithVPS(pinInput); // Sync immediately after login
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-pin': pinInput },
+        body: JSON.stringify({ action: 'verify_pin' })
+      });
+      if (!res.ok) {
+        setAuthError("PIN Salah!");
+        setIsVerifying(false);
+        return;
+      }
+      localStorage.setItem("admin_pin", pinInput);
+      setSessionPin(pinInput);
+      setIsAuthenticated(true);
+      syncGalleryWithVPS(pinInput); // Sync immediately after login
     } catch (err) {
-        setAuthError("Gagal verifikasi.");
+      setAuthError("Gagal verifikasi.");
     }
     setIsVerifying(false);
   };
@@ -583,13 +585,13 @@ export default function Home() {
     let timeLeft = duration;
     setUpscaleCooldownTime(timeLeft);
     const timer = setInterval(() => {
-       timeLeft -= 1;
-       setUpscaleCooldownTime(timeLeft);
-       if (timeLeft <= 0) {
-           clearInterval(timer);
-           setGlobalUpscaleState("IDLE");
-           setProgressText("");
-       }
+      timeLeft -= 1;
+      setUpscaleCooldownTime(timeLeft);
+      if (timeLeft <= 0) {
+        clearInterval(timer);
+        setGlobalUpscaleState("IDLE");
+        setProgressText("");
+      }
     }, 1000);
   };
 
@@ -605,19 +607,19 @@ export default function Home() {
       return `/api/storage/view${data.localUrl}`;
     } catch (err) {
       console.error("Local storage error:", err);
-      return url; 
+      return url;
     }
   };
 
   const deleteFileLocally = async (filePath: string) => {
     if (!filePath) return;
     // Extract the actual path if it contains the view proxy
-    const actualPath = filePath.includes('/api/storage/view') 
-      ? filePath.split('/api/storage/view')[1] 
+    const actualPath = filePath.includes('/api/storage/view')
+      ? filePath.split('/api/storage/view')[1]
       : filePath;
 
     if (!actualPath || !actualPath.startsWith('/outputs/')) return;
-    
+
     try {
       await fetch('/api/storage', {
         method: 'DELETE',
@@ -654,8 +656,8 @@ export default function Home() {
         const bgRes = await fetch('/api/generate', {
           method: 'POST',
           headers: API_HEADERS,
-          body: JSON.stringify({ 
-            action: "remove_bg", 
+          body: JSON.stringify({
+            action: "remove_bg",
             imageUrl: genData.imageUrl,
             rembgModel: rembgModel
           }),
@@ -668,7 +670,7 @@ export default function Home() {
         const localPath = await saveFileLocally(bgData.imageUrl, 'gen', undefined, ['rbg']);
 
         const newSticker = { url: localPath };
-        setGeneratedImages(prev => [newSticker, ...prev]); 
+        setGeneratedImages(prev => [newSticker, ...prev]);
         setProgress(((i + 1) / batchSize) * 100);
         if (i < batchSize - 1) await new Promise(r => setTimeout(r, 10000));
       }
@@ -687,29 +689,34 @@ export default function Home() {
     setProgressText("Initializing Vector Engine...");
 
     try {
-      const results: {id: string, url: string, timestamp: number, isPro: boolean}[] = [];
+      const results: { id: string, url: string, timestamp: number, isPro: boolean }[] = [];
       for (let i = 0; i < vectorBatchSize; i++) {
         setProgress(Math.round(((i) / vectorBatchSize) * 100));
         setProgressText(`Generating Vector ${i + 1} of ${vectorBatchSize}...`);
-        
+
+        const finalPrompt = isNoBackground
+          ? `${vectorPrompt}, white background, isolated, transparent background, no background, clean flat vector edges`
+          : vectorPrompt;
+
         const res = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Admin-PIN': sessionPin },
-          body: JSON.stringify({ 
-            action: "generate_vector", 
-            prompt: vectorPrompt,
+          body: JSON.stringify({
+            action: "generate_vector",
+            prompt: finalPrompt,
             stylePrefix: vectorStyle.prefix,
-            isPro: isVectorPro
+            isPro: isVectorPro,
+            aspect_ratio: vectorAspectRatio
           }),
         });
-        
+
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Generation failed");
 
         // v12.3: Save Vector result to VPS
         setProgressText(`Storing Vector [${i + 1}/${vectorBatchSize}]...`);
         const localPath = await saveFileLocally(data.imageUrl, 'vector', undefined, isVectorPro ? ['pro'] : undefined);
-        
+
         results.push({
           id: Math.random().toString(36).substr(2, 9),
           url: localPath,
@@ -719,7 +726,7 @@ export default function Home() {
 
         if (i < vectorBatchSize - 1) await new Promise(r => setTimeout(r, 1000));
       }
-      
+
       setVectorImages(prev => [...results, ...prev]);
     } catch (err: any) {
       alert(err.message);
@@ -748,8 +755,8 @@ export default function Home() {
   const handleDeleteAI = async (index: number) => {
     const target = generatedImages[index];
     if (target) {
-        await deleteFileLocally(target.url);
-        if (target.upscaledUrl) await deleteFileLocally(target.upscaledUrl);
+      await deleteFileLocally(target.url);
+      if (target.upscaledUrl) await deleteFileLocally(target.upscaledUrl);
     }
     setGeneratedImages(prev => prev.filter((_, i) => i !== index));
     if (studioTarget?.tab === 'gen' && studioTarget.idx === index) {
@@ -769,27 +776,27 @@ export default function Home() {
     setGeneratedImages(newData);
 
     try {
-       const res = await fetch('/api/generate', {
-         method: 'POST',
-         headers: API_HEADERS,
-         body: JSON.stringify({ action: "upscale", imageUrl: target.url }),
-       });
-       const data = await res.json();
-       if (!res.ok) throw new Error(data.error);
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: API_HEADERS,
+        body: JSON.stringify({ action: "upscale", imageUrl: target.url }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
 
-       // v12.3: Save Upscaled result to VPS (replace old if exists)
-       setProgressText(`Storing 4K local copy...`);
-       const existingTags = ['rbg']; // Gen is always rbg
-       const localPath = await saveFileLocally(data.imageUrl, 'gen', newData[index].url, [...existingTags, '4k']);
-       
-       newData[index].upscaledUrl = localPath;
-       newData[index].url = localPath; // Auto-promote to new main URL if upscaled
-    } catch(err: any) {
-       alert(err.message);
+      // v12.3: Save Upscaled result to VPS (replace old if exists)
+      setProgressText(`Storing 4K local copy...`);
+      const existingTags = ['rbg']; // Gen is always rbg
+      const localPath = await saveFileLocally(data.imageUrl, 'gen', newData[index].url, [...existingTags, '4k']);
+
+      newData[index].upscaledUrl = localPath;
+      newData[index].url = localPath; // Auto-promote to new main URL if upscaled
+    } catch (err: any) {
+      alert(err.message);
     } finally {
-       newData[index].isUpscaling = false;
-       setGeneratedImages([...newData]);
-       triggerCooldown();
+      newData[index].isUpscaling = false;
+      setGeneratedImages([...newData]);
+      triggerCooldown();
     }
   };
 
@@ -804,14 +811,14 @@ export default function Home() {
           const MAX_DIM = 1024; // Guaranteed safe limit for all Replicate GPU models
           let w = img.width, h = img.height;
           if (w > MAX_DIM || h > MAX_DIM) {
-            if (w > h) { h = (h/w)*MAX_DIM; w = MAX_DIM; }
-            else { w = (w/h)*MAX_DIM; h = MAX_DIM; }
+            if (w > h) { h = (h / w) * MAX_DIM; w = MAX_DIM; }
+            else { w = (w / h) * MAX_DIM; h = MAX_DIM; }
           }
           const canvas = document.createElement("canvas");
           canvas.width = w; canvas.height = h;
           canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
           const dataUrl = canvas.toDataURL("image/png");
-          
+
           // v12.4: Save the original upload to VPS immediately to avoid browser memory bloat
           const localUrl = await saveFileLocally(dataUrl, 'manual');
           setManualImages(prev => [
@@ -850,7 +857,7 @@ export default function Home() {
     try {
       const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       const image = imgRef.current;
-      
+
       if (!image) throw new Error("Image reference not found");
 
       // Calculate Scaling Factor (Natural vs Displayed)
@@ -874,10 +881,10 @@ export default function Home() {
       };
 
       const croppedImage = await getCroppedImg(
-        image, 
+        image,
         scaledPixelCrop
       );
-      
+
       // v12.4: Save Studio result to VPS and clean up old file
       const isManualRbg = tab === 'manual' && (target as any).isBackgroundRemoved;
       const is4k = !!target.upscaledUrl;
@@ -885,7 +892,7 @@ export default function Home() {
       if (tab === 'gen' || isManualRbg) currentTags.push('rbg');
       if (is4k) currentTags.push('4k');
       const localUrl = await saveFileLocally(croppedImage, tab === 'gen' ? 'gen' : 'manual', target.url, currentTags.length > 0 ? currentTags : undefined);
-      
+
       if (tab === 'gen') {
         setGeneratedImages(prev => {
           const newImages = [...prev];
@@ -903,7 +910,7 @@ export default function Home() {
           if (!newImages[idx]) return prev;
           newImages[idx] = {
             ...newImages[idx],
-            id: Math.random().toString(36).substr(2, 9), 
+            id: Math.random().toString(36).substr(2, 9),
             url: localUrl,
             originalUrl: localUrl,
             upscaledUrl: undefined,
@@ -929,20 +936,20 @@ export default function Home() {
     try {
       const resultUrl = cleanupCanvasRef.current.toDataURL("image/png");
       const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
-      
+
       // v12.4: Save Cleanup result to VPS and clean up old file
       const is4k = !!target.upscaledUrl;
       const nextTags = is4k ? ['rbg', '4k'] : ['rbg'];
       const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, nextTags);
-      
+
       if (tab === 'gen') {
         setGeneratedImages(prev => {
           const newImages = [...prev];
           if (!newImages[idx]) return prev;
-          newImages[idx] = { 
-            ...newImages[idx], 
-            url: localUrl, 
-            upscaledUrl: undefined 
+          newImages[idx] = {
+            ...newImages[idx],
+            url: localUrl,
+            upscaledUrl: undefined
           };
           return newImages;
         });
@@ -950,10 +957,10 @@ export default function Home() {
         setManualImages(prev => {
           const newImages = [...prev];
           if (!newImages[idx]) return prev;
-          newImages[idx] = { 
-            ...newImages[idx], 
-            url: localUrl, 
-            originalUrl: localUrl, 
+          newImages[idx] = {
+            ...newImages[idx],
+            url: localUrl,
+            originalUrl: localUrl,
             upscaledUrl: undefined,
             isBackgroundRemoved: true
           };
@@ -990,21 +997,21 @@ export default function Home() {
         img.onerror = reject;
         img.src = stableStudioUrl;
       });
-      
+
       const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       // v12.4: Save Refinement result to VPS and clean up old file
       const is4k = !!target.upscaledUrl;
       const nextTags = is4k ? ['rbg', '4k'] : ['rbg'];
       const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, nextTags);
-      
+
       if (tab === 'gen') {
         setGeneratedImages(prev => {
           const newImages = [...prev];
           if (!newImages[idx]) return prev;
-          newImages[idx] = { 
-            ...newImages[idx], 
-            url: localUrl, 
-            upscaledUrl: undefined 
+          newImages[idx] = {
+            ...newImages[idx],
+            url: localUrl,
+            upscaledUrl: undefined
           };
           return newImages;
         });
@@ -1012,11 +1019,11 @@ export default function Home() {
         setManualImages(prev => {
           const newImages = [...prev];
           if (!newImages[idx]) return prev;
-          newImages[idx] = { 
-            ...newImages[idx], 
-            id: Math.random().toString(36).substr(2, 9), 
-            url: localUrl, 
-            originalUrl: localUrl, 
+          newImages[idx] = {
+            ...newImages[idx],
+            id: Math.random().toString(36).substr(2, 9),
+            url: localUrl,
+            originalUrl: localUrl,
             upscaledUrl: undefined,
             isBackgroundRemoved: newImages[idx].isBackgroundRemoved
           };
@@ -1039,11 +1046,11 @@ export default function Home() {
     const canvas = cleanupCanvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    
+
     // Support both mouse and touch, accounting for React synthetic events vs native
     const clientX = (e as any).touches ? (e as any).touches[0].clientX : (e as any).clientX;
     const clientY = (e as any).touches ? (e as any).touches[0].clientY : (e as any).clientY;
-    
+
     // Position relative to canvas display element
     const displayX = clientX - rect.left;
     const displayY = clientY - rect.top;
@@ -1051,7 +1058,7 @@ export default function Home() {
     // Convert display position to natural canvas coordinates
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    
+
     return {
       x: Math.floor(displayX * scaleX),
       y: Math.floor(displayY * scaleY)
@@ -1112,7 +1119,7 @@ export default function Home() {
   const handleEraserMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const isTouch = 'touches' in e.nativeEvent;
     if (!isTouch && (e as React.MouseEvent).buttons !== 1) return;
-    
+
     const canvas = cleanupCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -1148,7 +1155,7 @@ export default function Home() {
 
     const currentState = canvas.toDataURL();
     const prevState = cleanupHistory[cleanupHistory.length - 1];
-    
+
     setCleanupRedoStack(prev => [...prev, currentState]);
     setCleanupHistory(prev => prev.slice(0, -1));
 
@@ -1186,16 +1193,16 @@ export default function Home() {
   const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const { width, height, naturalWidth, naturalHeight } = e.currentTarget;
     const imageAspect = width / height;
-    
+
     // Always provide an initial crop (Maximized)
     let initialCrop: Crop;
     if (cropAspect) {
       const isImageWiderThanAspect = imageAspect > cropAspect;
       initialCrop = centerCrop(
         makeAspectCrop(
-          { unit: '%', [isImageWiderThanAspect ? 'height' : 'width']: 100 }, 
-          cropAspect, 
-          width, 
+          { unit: '%', [isImageWiderThanAspect ? 'height' : 'width']: 100 },
+          cropAspect,
+          width,
           height
         ),
         width,
@@ -1204,7 +1211,7 @@ export default function Home() {
     } else {
       initialCrop = { unit: '%' as const, x: 0, y: 0, width: 100, height: 100 };
     }
-    
+
     setCrop(initialCrop);
 
     // Also calculate initial PixelCrop so Simpan button is active immediately
@@ -1220,7 +1227,7 @@ export default function Home() {
 
   const handleManualAction = async (idx: number, type: "remove_bg" | "upscale") => {
     if (isManualBatchProcessing || globalUpscaleState !== "IDLE" || isGenerating) return;
-    
+
     const target = manualImages[idx];
     const newImages = [...manualImages];
 
@@ -1229,47 +1236,47 @@ export default function Home() {
     setManualImages([...newImages]);
 
     try {
-        const res = await fetch('/api/generate', {
-          method: 'POST',
-          headers: API_HEADERS,
-          body: JSON.stringify({ 
-            action: type, 
-            imageUrl: type === "upscale" ? (target.upscaledUrl || target.url) : target.url,
-            rembgModel: type === "remove_bg" ? rembgModel : undefined
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: API_HEADERS,
+        body: JSON.stringify({
+          action: type,
+          imageUrl: type === "upscale" ? (target.upscaledUrl || target.url) : target.url,
+          rembgModel: type === "remove_bg" ? rembgModel : undefined
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
 
-        // v12.4: Core replacement logic - upscale replaces the current active image (url)
-        const is4k = type === 'upscale' || !!target.upscaledUrl;
-        const isRbg = type === 'remove_bg' || target.isBackgroundRemoved;
-        const currentTags = [];
-        if (isRbg) currentTags.push('rbg');
-        if (is4k) currentTags.push('4k');
+      // v12.4: Core replacement logic - upscale replaces the current active image (url)
+      const is4k = type === 'upscale' || !!target.upscaledUrl;
+      const isRbg = type === 'remove_bg' || target.isBackgroundRemoved;
+      const currentTags = [];
+      if (isRbg) currentTags.push('rbg');
+      if (is4k) currentTags.push('4k');
 
-        const localPath = await saveFileLocally(
-          data.imageUrl, 
-          'manual', 
-          type === 'remove_bg' ? target.url : (target.upscaledUrl || target.url),
-          currentTags
-        );
+      const localPath = await saveFileLocally(
+        data.imageUrl,
+        'manual',
+        type === 'remove_bg' ? target.url : (target.upscaledUrl || target.url),
+        currentTags
+      );
 
-        if (type === "remove_bg") {
-          newImages[idx].url = localPath;
-          newImages[idx].isBackgroundRemoved = true;
-        } else {
-          newImages[idx].url = localPath; // Sync active url to upscale result
-          newImages[idx].upscaledUrl = localPath;
-        }
-        
-        triggerCooldown();
+      if (type === "remove_bg") {
+        newImages[idx].url = localPath;
+        newImages[idx].isBackgroundRemoved = true;
+      } else {
+        newImages[idx].url = localPath; // Sync active url to upscale result
+        newImages[idx].upscaledUrl = localPath;
+      }
+
+      triggerCooldown();
     } catch (err: any) {
-        alert(err.message);
+      alert(err.message);
     } finally {
-        newImages[idx].isProcessing = false;
-        newImages[idx].isUpscaling = false;
-        setManualImages([...newImages]);
+      newImages[idx].isProcessing = false;
+      newImages[idx].isUpscaling = false;
+      setManualImages([...newImages]);
     }
   };
 
@@ -1277,76 +1284,76 @@ export default function Home() {
     if (isManualBatchProcessing || globalUpscaleState !== "IDLE" || isGenerating) return;
     setIsManualBatchProcessing(true);
     setProgressText(`Memulai Batch Manual: ${type === "remove_bg" ? "Hapus BG" : "Upscale 4K"}...`);
-    
+
     try {
-        const itemsToProcess = manualImages.filter(img => 
-          type === "remove_bg" ? img.url === img.originalUrl : !img.upscaledUrl
-        );
-        
-        if (itemsToProcess.length === 0) {
-            alert(`Semua gambar sudah di-${type === "remove_bg" ? "rembg" : "upscale"}!`);
-            setIsManualBatchProcessing(false);
-            return;
-        }
+      const itemsToProcess = manualImages.filter(img =>
+        type === "remove_bg" ? img.url === img.originalUrl : !img.upscaledUrl
+      );
 
-        for (let i = 0; i < manualImages.length; i++) {
-           const img = manualImages[i];
-           
-           if (type === "remove_bg" && img.url === img.originalUrl) {
-              setProgressText(`Rembg [${i+1}/${manualImages.length}]...`);
-              const res = await fetch('/api/generate', {
-                method: 'POST',
-                headers: API_HEADERS,
-                body: JSON.stringify({ 
-                  action: "remove_bg", 
-                  imageUrl: img.originalUrl,
-                  rembgModel: rembgModel
-                }),
-              });
-              const data = await res.json();
-              if (res.ok) {
-                // v12.4: Save Batch Rembg to VPS
-                const is4k = !!img.upscaledUrl;
-                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url, is4k ? ['rbg', '4k'] : ['rbg']);
-
-                setManualImages(prev => {
-                  const updated = [...prev];
-                  updated[i].url = localPath;
-                  updated[i].isBackgroundRemoved = true;
-                  return updated;
-                });
-                if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
-              }
-           }
-
-           if (type === "upscale" && !img.upscaledUrl) {
-              setProgressText(`Upscale [${i+1}/${manualImages.length}]...`);
-              const res = await fetch('/api/generate', {
-                method: 'POST',
-                headers: API_HEADERS,
-                body: JSON.stringify({ action: "upscale", imageUrl: img.url }),
-              });
-              const data = await res.json();
-              if (res.ok) {
-                // v12.4: Core replacement logic - upscale replaces current image in batch mode
-                const isManualRbg = img.isBackgroundRemoved;
-                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl || img.url, isManualRbg ? ['rbg', '4k'] : ['4k']);
-
-                setManualImages(prev => {
-                  const updated = [...prev];
-                  updated[i].url = localPath; // Sync active url to upscale result
-                  updated[i].upscaledUrl = localPath;
-                  return updated;
-                });
-                if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
-              }
-           }
-        }
-        triggerCooldown();
-    } catch (err: any) {
-        alert(err.message);
-    } finally {
+      if (itemsToProcess.length === 0) {
+        alert(`Semua gambar sudah di-${type === "remove_bg" ? "rembg" : "upscale"}!`);
         setIsManualBatchProcessing(false);
+        return;
+      }
+
+      for (let i = 0; i < manualImages.length; i++) {
+        const img = manualImages[i];
+
+        if (type === "remove_bg" && img.url === img.originalUrl) {
+          setProgressText(`Rembg [${i + 1}/${manualImages.length}]...`);
+          const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: API_HEADERS,
+            body: JSON.stringify({
+              action: "remove_bg",
+              imageUrl: img.originalUrl,
+              rembgModel: rembgModel
+            }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            // v12.4: Save Batch Rembg to VPS
+            const is4k = !!img.upscaledUrl;
+            const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url, is4k ? ['rbg', '4k'] : ['rbg']);
+
+            setManualImages(prev => {
+              const updated = [...prev];
+              updated[i].url = localPath;
+              updated[i].isBackgroundRemoved = true;
+              return updated;
+            });
+            if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
+          }
+        }
+
+        if (type === "upscale" && !img.upscaledUrl) {
+          setProgressText(`Upscale [${i + 1}/${manualImages.length}]...`);
+          const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: API_HEADERS,
+            body: JSON.stringify({ action: "upscale", imageUrl: img.url }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            // v12.4: Core replacement logic - upscale replaces current image in batch mode
+            const isManualRbg = img.isBackgroundRemoved;
+            const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl || img.url, isManualRbg ? ['rbg', '4k'] : ['4k']);
+
+            setManualImages(prev => {
+              const updated = [...prev];
+              updated[i].url = localPath; // Sync active url to upscale result
+              updated[i].upscaledUrl = localPath;
+              return updated;
+            });
+            if (i < manualImages.length - 1) await new Promise(r => setTimeout(r, 10000));
+          }
+        }
+      }
+      triggerCooldown();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsManualBatchProcessing(false);
     }
   };
 
@@ -1357,13 +1364,13 @@ export default function Home() {
     const folder = zip.folder("stickers");
     if (!folder) return;
     try {
-        await Promise.all(images.map(async (item, idx) => {
-            const res = await fetch(item.upscaledUrl || item.url);
-            const blob = await res.blob();
-            folder.file(`sticker_${idx+1}${item.upscaledUrl ? '_4k' : ''}.png`, blob);
-        }));
-        const content = await zip.generateAsync({ type: "blob" });
-        saveAs(content, `stickers_${source}.zip`);
+      await Promise.all(images.map(async (item, idx) => {
+        const res = await fetch(item.upscaledUrl || item.url);
+        const blob = await res.blob();
+        folder.file(`sticker_${idx + 1}${item.upscaledUrl ? '_4k' : ''}.png`, blob);
+      }));
+      const content = await zip.generateAsync({ type: "blob" });
+      saveAs(content, `stickers_${source}.zip`);
     } catch (e) { alert("ZIP error"); }
   };
 
@@ -1380,32 +1387,32 @@ export default function Home() {
                 <ShieldCheck className="w-8 h-8 text-white" />
               </div>
             </div>
-            
+
             <h1 className="text-2xl font-bold text-center text-white mb-2">Production Login</h1>
             <p className="text-zinc-500 text-sm text-center mb-8">Access restricted to authorized production staff only.</p>
-            
+
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Admin Access PIN</label>
-                <input 
-                  type="password" 
-                  value={pinInput} 
-                  onChange={(e) => setPinInput(e.target.value)} 
-                  placeholder="••••••" 
+                <input
+                  type="password"
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value)}
+                  placeholder="••••••"
                   className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-center text-2xl tracking-[0.5em] text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all font-mono"
                   autoFocus
                 />
               </div>
-              
+
               {authError && (
                 <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-500 text-xs text-center animate-shake">
                   {authError}
                 </div>
               )}
-              
-              <button 
-                type="submit" 
-                disabled={isVerifying || !pinInput.trim()} 
+
+              <button
+                type="submit"
+                disabled={isVerifying || !pinInput.trim()}
                 className="w-full py-4 bg-indigo-500 hover:bg-indigo-400 disabled:bg-zinc-800 text-white rounded-2xl font-bold transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
               >
                 {isVerifying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-4 h-4" />}
@@ -1420,7 +1427,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center p-6 md:p-12 w-full max-w-6xl mx-auto">
-      
+
       <div className="absolute top-4 right-4 z-20"><button onClick={handleLogout} className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-full text-sm font-semibold flex items-center gap-2"><LogOut className="w-4 h-4" /> Logout</button></div>
 
       <div className="text-center mb-8 mt-8">
@@ -1432,33 +1439,33 @@ export default function Home() {
         )}>
           {/* Main Tab Switcher */}
           <div className="inline-flex bg-white/5 border border-white/10 p-0.5 md:p-1 rounded-2xl backdrop-blur-md">
-             <button 
-               onClick={() => { setActiveTab("generator"); setStudioTarget(null); setPreviewImage(null); }} 
-               disabled={isGloballyLocked}
-               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
-             > 
-               <Zap className="w-3.5 h-3.5 md:w-4 h-4" /> 
-               <span className="md:hidden">AI</span>
-               <span className="hidden md:inline">AI Generator</span>
-             </button>
-             <button 
-               onClick={() => { setActiveTab("manual"); setStudioTarget(null); setPreviewImage(null); }} 
-               disabled={isGloballyLocked}
-               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
-             > 
-               <Upload className="w-3.5 h-3.5 md:w-4 h-4" /> 
-               <span className="md:hidden">Tool</span>
-               <span className="hidden md:inline">Manual Tool</span>
-             </button>
-             <button 
-               onClick={() => { setActiveTab("vector"); setStudioTarget(null); setPreviewImage(null); setIsVectorWarningOpen(true); }} 
-               disabled={isGloballyLocked}
-               className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "vector" ? "bg-emerald-500 text-white shadow-lg" : "text-zinc-500")}
-             > 
-               <Shapes className="w-3.5 h-3.5 md:w-4 h-4" /> 
-               <span className="md:hidden">Vector</span>
-               <span className="hidden md:inline">Vector Studio</span>
-             </button>
+            <button
+              onClick={() => { setActiveTab("generator"); setStudioTarget(null); setPreviewImage(null); }}
+              disabled={isGloballyLocked}
+              className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "generator" ? "bg-indigo-500 text-white shadow-lg" : "text-zinc-500")}
+            >
+              <Zap className="w-3.5 h-3.5 md:w-4 h-4" />
+              <span className="md:hidden">AI</span>
+              <span className="hidden md:inline">AI Generator</span>
+            </button>
+            <button
+              onClick={() => { setActiveTab("manual"); setStudioTarget(null); setPreviewImage(null); }}
+              disabled={isGloballyLocked}
+              className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "manual" ? "bg-pink-500 text-white shadow-lg" : "text-zinc-500")}
+            >
+              <Upload className="w-3.5 h-3.5 md:w-4 h-4" />
+              <span className="md:hidden">Tool</span>
+              <span className="hidden md:inline">Manual Tool</span>
+            </button>
+            <button
+              onClick={() => { setActiveTab("vector"); setStudioTarget(null); setPreviewImage(null); setIsVectorWarningOpen(true); }}
+              disabled={isGloballyLocked}
+              className={clsx("px-4 md:px-6 py-2 md:py-2.5 rounded-xl text-[11px] md:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-30 disabled:cursor-not-allowed", activeTab === "vector" ? "bg-emerald-500 text-white shadow-lg" : "text-zinc-500")}
+            >
+              <Shapes className="w-3.5 h-3.5 md:w-4 h-4" />
+              <span className="md:hidden">Vector</span>
+              <span className="hidden md:inline">Vector Studio</span>
+            </button>
           </div>
 
           <div className="w-px h-5 md:h-6 bg-white/10 mx-0.5" />
@@ -1550,129 +1557,175 @@ export default function Home() {
                   <div className="space-y-2"> {MODES.map(m => <button key={m.id} onClick={() => setMode(m.id)} className={clsx("w-full p-3 rounded-xl border flex items-center gap-3 transition-colors", mode === m.id ? "border-pink-500 bg-pink-500/10" : "border-white/10 hover:bg-white/5")}> <m.icon className="w-5 h-5 text-indigo-400" /> <div className="text-left"><div className="text-sm font-bold">{m.name}</div><div className="text-[10px] text-zinc-500 leading-tight">{m.desc}</div></div> </button>)} </div>
                 </div>
 
-                 <button onClick={handleGenerate} disabled={isGloballyLocked || !prompt.trim()} className="w-full py-4 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-bold transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"> {isGenerating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Generate Batch"} </button>
+                <button onClick={handleGenerate} disabled={isGloballyLocked || !prompt.trim()} className="w-full py-4 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-bold transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-indigo-500/20"> {isGenerating ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Generate Batch"} </button>
               </div>
             </div>
           ) : activeTab === "vector" ? (
-             <div className="glass-panel p-6 rounded-2xl relative overflow-hidden group">
-               <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-cyan-500" />
-               <h2 className="text-xl font-bold mb-6 flex items-center gap-2"> <Shapes className="w-5 h-5 text-emerald-400" /> Vector Generator </h2>
-               
-               <div className="space-y-6">
-                 {/* Vector Prompt */}
-                 <div className="space-y-2">
-                   <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Descriptive Prompt</label>
-                   <textarea value={vectorPrompt} onChange={(e) => setVectorPrompt(e.target.value)} placeholder="e.g. A cute futuristic robot cat icon, minimalist clean lines..." className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[100px] resize-none" />
-                 </div>
+            <div className="glass-panel p-6 rounded-2xl relative overflow-hidden group">
+              <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-cyan-500" />
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-2"> <Shapes className="w-5 h-5 text-emerald-400" /> Vector Generator </h2>
 
-                 {/* Vector Style Selector */}
-                 <div className="space-y-2">
-                   <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Vector Aesthetic</label>
-                   <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-white/10">
-                      {VECTOR_STYLES.map(style => (
-                        <button key={style.id} onClick={() => setVectorStyle(style)} className={clsx("p-2 rounded-xl border text-[10px] font-bold transition-all", vectorStyle.id === style.id ? "bg-emerald-500/20 border-emerald-500 text-emerald-400" : "bg-white/5 border-white/5 text-zinc-500 hover:bg-white/10 hover:text-zinc-300")}>
-                          {style.name}
+              <div className="space-y-6">
+                {/* Vector Prompt */}
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Descriptive Prompt</label>
+                  <textarea value={vectorPrompt} onChange={(e) => setVectorPrompt(e.target.value)} placeholder="e.g. A cute futuristic robot cat icon, minimalist clean lines..." className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all min-h-[100px] resize-none" />
+                </div>
+
+                {/* New Controls: Aspect Ratio & No Background */}
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Aspect Ratio</span>
+                    <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/5">
+                      {[
+                        { label: "1:1", val: "1:1" },
+                        { label: "4:3", val: "4:3" },
+                        { label: "3:4", val: "3:4" },
+                        { label: "16:9", val: "16:9" },
+                        { label: "9:16", val: "9:16" },
+                      ].map((ratio) => (
+                        <button
+                          key={ratio.val}
+                          onClick={() => setVectorAspectRatio(ratio.val)}
+                          className={clsx(
+                            "flex-1 py-1.5 rounded-lg text-[9px] font-black tracking-widest transition-all",
+                            vectorAspectRatio === ratio.val ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white"
+                          )}
+                        >
+                          {ratio.label}
                         </button>
                       ))}
-                   </div>
-                 </div>
-
-                 {/* Batch Size & Pro Toggle */}
-                 <div className="flex flex-col gap-4 p-4 bg-black/40 rounded-2xl border border-white/5">
-                    <div className="flex justify-between items-center">
-                       <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Pro Mode (V4 Pro)</span>
-                       <button onClick={() => { if(!isVectorPro) setIsProSwitchModalOpen(true); else setIsVectorPro(false); }} className={clsx("w-12 h-6 rounded-full p-1 transition-all", isVectorPro ? "bg-emerald-500" : "bg-zinc-800")}>
-                          <div className={clsx("w-4 h-4 rounded-full bg-white transition-all shadow-md", isVectorPro ? "translate-x-6" : "translate-x-0")} />
-                       </button>
                     </div>
+                  </div>
 
-                    <div className="space-y-2">
-                       <div className="flex justify-between text-[10px] font-bold text-zinc-500">
-                          <span>BATCH SIZE</span>
-                          <span className="text-emerald-400">{vectorBatchSize}</span>
-                       </div>
-                       <input type="range" min="1" max="10" value={vectorBatchSize} onChange={(e) => setVectorBatchSize(parseInt(e.target.value))} className="w-full accent-emerald-500 cursor-pointer" />
+                  <div className="flex items-center justify-between bg-black/40 p-3 rounded-xl border border-white/5">
+                    <div className="flex items-center gap-2">
+                      <Eraser className={clsx("w-4 h-4", isNoBackground ? "text-emerald-400" : "text-zinc-500")} />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">No Background (Injection)</span>
                     </div>
+                    <button
+                      onClick={() => setIsNoBackground(!isNoBackground)}
+                      className={clsx(
+                        "w-10 h-5 rounded-full transition-all relative p-1",
+                        isNoBackground ? "bg-emerald-500" : "bg-zinc-800"
+                      )}
+                    >
+                      <div className={clsx(
+                        "w-3 h-3 bg-white rounded-full transition-all",
+                        isNoBackground ? "translate-x-5" : "translate-x-0"
+                      )} />
+                    </button>
+                  </div>
+                </div>
 
-                    <div className="pt-2 border-t border-white/5 flex justify-between items-center">
-                       <span className="text-[10px] text-zinc-500 font-bold">ESTIMATED COST</span>
-                       <span className="text-xs font-black text-white">${(vectorBatchSize * (isVectorPro ? 0.30 : 0.08)).toFixed(2)}</span>
+                {/* Vector Style Selector */}
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-1">Vector Aesthetic</label>
+                  <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-white/10">
+                    {VECTOR_STYLES.map(style => (
+                      <button key={style.id} onClick={() => setVectorStyle(style)} className={clsx("p-2 rounded-xl border text-[10px] font-bold transition-all", vectorStyle.id === style.id ? "bg-emerald-500/20 border-emerald-500 text-emerald-400" : "bg-white/5 border-white/5 text-zinc-500 hover:bg-white/10 hover:text-zinc-300")}>
+                        {style.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Batch Size & Pro Toggle */}
+                <div className="flex flex-col gap-4 p-4 bg-black/40 rounded-2xl border border-white/5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Pro Mode (V4 Pro)</span>
+                    <button onClick={() => { if (!isVectorPro) setIsProSwitchModalOpen(true); else setIsVectorPro(false); }} className={clsx("w-12 h-6 rounded-full p-1 transition-all", isVectorPro ? "bg-emerald-500" : "bg-zinc-800")}>
+                      <div className={clsx("w-4 h-4 rounded-full bg-white transition-all shadow-md", isVectorPro ? "translate-x-6" : "translate-x-0")} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-[10px] font-bold text-zinc-500">
+                      <span>BATCH SIZE</span>
+                      <span className="text-emerald-400">{vectorBatchSize}</span>
                     </div>
-                 </div>
+                    <input type="range" min="1" max="10" value={vectorBatchSize} onChange={(e) => setVectorBatchSize(parseInt(e.target.value))} className="w-full accent-emerald-500 cursor-pointer" />
+                  </div>
 
-                 <button 
-                    onClick={handleGenerateVector} 
-                    disabled={isGloballyLocked || !vectorPrompt.trim()} 
-                    className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
-                  > 
-                     {isVectorGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Zap className="w-4 h-4" /> Generate Vector Assets</>}
-                  </button>
-               </div>
-             </div>
+                  <div className="pt-2 border-t border-white/5 flex justify-between items-center">
+                    <span className="text-[10px] text-zinc-500 font-bold">ESTIMATED COST</span>
+                    <span className="text-xs font-black text-white">${(vectorBatchSize * (isVectorPro ? 0.30 : 0.08)).toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleGenerateVector}
+                  disabled={isGloballyLocked || !vectorPrompt.trim()}
+                  className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                  {isVectorGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Zap className="w-4 h-4" /> Generate Vector Assets</>}
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="glass-panel p-6 rounded-2xl">
               <h2 className="text-xl font-bold mb-6 flex items-center gap-2"> <Upload className="w-5 h-5 text-pink-400" /> Manual Upload </h2>
               <div className="space-y-6">
-                  <div 
-                    onClick={() => fileInputRef.current?.click()} 
-                    onDragOver={(e) => {e.preventDefault(); setIsDragging(true)}} 
-                    onDragLeave={() => setIsDragging(false)} 
-                    onDrop={async (e) => {
-                      e.preventDefault(); 
-                      setIsDragging(false); 
-                      if(e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        setIsSyncingToVPS(true);
-                        setProgressText(`Menyinkronkan ${e.dataTransfer.files.length} file ke VPS...`);
-                        try {
-                          for (const file of Array.from(e.dataTransfer.files)) {
-                            await processFile(file);
-                          }
-                        } finally {
-                          setIsSyncingToVPS(false);
-                          setProgressText("");
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={async (e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      setIsSyncingToVPS(true);
+                      setProgressText(`Menyinkronkan ${e.dataTransfer.files.length} file ke VPS...`);
+                      try {
+                        for (const file of Array.from(e.dataTransfer.files)) {
+                          await processFile(file);
                         }
+                      } finally {
+                        setIsSyncingToVPS(false);
+                        setProgressText("");
                       }
-                    }} 
-                    className={clsx("border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all", isDragging ? "border-pink-500 bg-pink-500/10" : "border-white/10")}
-                  >
-                    <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
-                    <Upload className="w-8 h-8 text-zinc-500" />
-                    <p className="text-zinc-500 text-[10px] text-center">Seret banyak file ke sini atau klik untuk memilih.</p>
-                  </div>
+                    }
+                  }}
+                  className={clsx("border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all", isDragging ? "border-pink-500 bg-pink-500/10" : "border-white/10")}
+                >
+                  <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
+                  <Upload className="w-8 h-8 text-zinc-500" />
+                  <p className="text-zinc-500 text-[10px] text-center">Seret banyak file ke sini atau klik untuk memilih.</p>
+                </div>
 
-                 <div className="flex flex-col gap-3">
-                    <button 
-                      onClick={() => handleBatchManual("remove_bg")} 
-                      disabled={manualImages.length === 0 || isGloballyLocked} 
-                      className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex justify-center items-center gap-2 border border-white/10"
-                    >
-                       {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5 text-indigo-400" />}
-                       {globalUpscaleState === "COOLDOWN" ? `Tunggu (${upscaleCooldownTime}s)` : manualImages.some(m => m.isProcessing) ? "Memproses..." : "Hapus BG Massal"}
-                    </button>
-                    <button 
-                      onClick={() => handleBatchManual("upscale")} 
-                      disabled={manualImages.length === 0 || isGloballyLocked} 
-                      className="w-full py-4 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex justify-center items-center gap-2 shadow-lg shadow-pink-500/10"
-                    >
-                       {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                       {globalUpscaleState === "COOLDOWN" ? `Jeda API (${upscaleCooldownTime}s)` : manualImages.some(m => m.isUpscaling) ? "Memproses..." : "Upscale 4K Massal"}
-                    </button>
-                 </div>
-                 <button 
-                    onClick={async () => { 
-                      if (confirm("Bersihkan semua daftar manual?")) {
-                        for (const img of manualImages) {
-                          await deleteFileLocally(img.url);
-                          if (img.upscaledUrl) await deleteFileLocally(img.upscaledUrl);
-                        }
-                        setManualImages([]); 
-                      }
-                    }} 
-                    disabled={manualImages.length === 0} 
-                    className="w-full py-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold flex justify-center items-center gap-2"
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => handleBatchManual("remove_bg")}
+                    disabled={manualImages.length === 0 || isGloballyLocked}
+                    className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex justify-center items-center gap-2 border border-white/10"
                   >
-                    <Trash2 className="w-4 h-4" /> Bersihkan Daftar
-                 </button>
+                    {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5 text-indigo-400" />}
+                    {globalUpscaleState === "COOLDOWN" ? `Tunggu (${upscaleCooldownTime}s)` : manualImages.some(m => m.isProcessing) ? "Memproses..." : "Hapus BG Massal"}
+                  </button>
+                  <button
+                    onClick={() => handleBatchManual("upscale")}
+                    disabled={manualImages.length === 0 || isGloballyLocked}
+                    className="w-full py-4 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex justify-center items-center gap-2 shadow-lg shadow-pink-500/10"
+                  >
+                    {isManualBatchProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                    {globalUpscaleState === "COOLDOWN" ? `Jeda API (${upscaleCooldownTime}s)` : manualImages.some(m => m.isUpscaling) ? "Memproses..." : "Upscale 4K Massal"}
+                  </button>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (confirm("Bersihkan semua daftar manual?")) {
+                      for (const img of manualImages) {
+                        await deleteFileLocally(img.url);
+                        if (img.upscaledUrl) await deleteFileLocally(img.upscaledUrl);
+                      }
+                      setManualImages([]);
+                    }
+                  }}
+                  disabled={manualImages.length === 0}
+                  className="w-full py-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold flex justify-center items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" /> Bersihkan Daftar
+                </button>
               </div>
             </div>
           )}
@@ -1682,7 +1735,7 @@ export default function Home() {
         <div className="lg:col-span-8 flex flex-col min-h-[600px]">
           <div className="glass-panel p-6 rounded-2xl flex-1 flex flex-col">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold flex items-center gap-2"> 
+              <h2 className="text-xl font-bold flex items-center gap-2">
                 {activeTab === 'vector' ? <Shapes className="w-5 h-5 text-emerald-400" /> : <ImageIcon className="w-5 h-5 text-pink-400" />}
                 {activeTab === 'vector' ? 'Vector Asset Library' : 'Production Gallery'}
               </h2>
@@ -1698,15 +1751,15 @@ export default function Home() {
             </div>
 
             {(isGenerating || isManualBatchProcessing || isVectorGenerating) && (
-                <div className={clsx(
-                  "mb-6 p-4 rounded-xl border animate-pulse",
-                  isVectorGenerating ? "bg-emerald-500/10 border-emerald-500/30" : "bg-indigo-500/10 border-indigo-500/30"
-                )}>
-                   <p className={clsx(
-                     "text-sm font-bold text-center italic",
-                     isVectorGenerating ? "text-emerald-400" : "text-indigo-400"
-                   )}>{progressText || "Memproses permintaan anda..."}</p>
-                </div>
+              <div className={clsx(
+                "mb-6 p-4 rounded-xl border animate-pulse",
+                isVectorGenerating ? "bg-emerald-500/10 border-emerald-500/30" : "bg-indigo-500/10 border-indigo-500/30"
+              )}>
+                <p className={clsx(
+                  "text-sm font-bold text-center italic",
+                  isVectorGenerating ? "text-emerald-400" : "text-indigo-400"
+                )}>{progressText || "Memproses permintaan anda..."}</p>
+              </div>
             )}
 
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -1716,40 +1769,40 @@ export default function Home() {
                 ))
               ) : activeTab === "generator" ? (
                 generatedImages.map((img, idx) => (
-                  <StickerCard 
-                    key={idx} 
-                    img={img} 
-                    onUpscale={() => handleUpscale(idx)} 
-                    onPreview={() => setPreviewImage(img.upscaledUrl || img.url)} 
-                    onRefine={(initialMode) => { 
-                      setRefineAmount(1); 
+                  <StickerCard
+                    key={idx}
+                    img={img}
+                    onUpscale={() => handleUpscale(idx)}
+                    onPreview={() => setPreviewImage(img.upscaledUrl || img.url)}
+                    onRefine={(initialMode) => {
+                      setRefineAmount(1);
                       setStudioMode(initialMode || 'REFINE');
-                      setStudioTarget({idx, tab: 'gen'}); 
+                      setStudioTarget({ idx, tab: 'gen' });
                     }}
                     onDelete={() => handleDeleteAI(idx)}
-                    globalLock={globalUpscaleState !== "IDLE" || isGenerating} 
+                    globalLock={globalUpscaleState !== "IDLE" || isGenerating}
                     upscaleCooldownTime={upscaleCooldownTime}
                   />
                 ))
               ) : (
                 manualImages.map((img, idx) => (
                   <div key={img.id} className="group relative">
-                    <ManualCard 
-                      img={img} 
+                    <ManualCard
+                      img={img}
                       idx={idx}
                       onManualAction={handleManualAction}
                       onCropOpen={(idx) => {
-                        setStudioTarget({idx, tab: 'manual'}); 
+                        setStudioTarget({ idx, tab: 'manual' });
                         setStudioMode('CROP');
-                        setCrop(undefined); 
+                        setCrop(undefined);
                         setCropAspect(undefined);
                         setShowCropControls(true);
                       }}
                       onPreview={(url) => setPreviewImage(url)}
-                      onRefine={(idx, initialMode) => { 
-                        setRefineAmount(1); 
+                      onRefine={(idx, initialMode) => {
+                        setRefineAmount(1);
                         setStudioMode(initialMode || 'REFINE');
-                        setStudioTarget({idx, tab: 'manual'}); 
+                        setStudioTarget({ idx, tab: 'manual' });
                       }}
                       onDelete={async (id) => {
                         const target = manualImages.find(x => x.id === id);
@@ -1797,7 +1850,7 @@ export default function Home() {
       {studioTarget !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-4 animate-in fade-in duration-300">
           <div className="absolute inset-0 bg-black/95 backdrop-blur-3xl" />
-          
+
           <div className="relative w-full h-full max-w-7xl bg-zinc-950 sm:rounded-[32px] overflow-hidden flex flex-col border border-white/10 shadow-2xl">
             <div className="p-2 md:p-5 border-b border-white/5 flex flex-row items-center justify-between bg-zinc-900/50 gap-2 md:gap-4">
               {!isMobile && (
@@ -1814,47 +1867,47 @@ export default function Home() {
                   </div>
                 </div>
               )}
- 
-               {/* Mode Tabs */}
-               <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5 w-full md:w-auto">
-                 <button 
-                   onClick={() => setStudioMode('CROP')} 
-                   className={clsx(
-                     "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
-                     studioMode === 'CROP' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white disabled:opacity-20 disabled:grayscale"
-                   )}
-                 >
-                   <Scissors className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Potong</span>
-                 </button>
-                 <button 
-                   onClick={() => setStudioMode('REFINE')} 
-                   className={clsx(
-                     "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
-                     studioMode === 'REFINE' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white"
-                   )}
-                 >
-                   <Sparkles className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Refine</span>
-                 </button>
-                 <button 
-                   onClick={() => setStudioMode('CLEANUP')} 
-                   className={clsx(
-                     "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
-                     studioMode === 'CLEANUP' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white"
-                   )}
-                 >
-                   <Wand2 className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Bersihkan</span>
-                 </button>
-               </div>
- 
-               <div className="flex items-center gap-2">
-                 <button 
-                   onClick={() => { setStudioTarget(null); setShowStudioControls(false); }}
-                   className="p-1.5 md:p-2 hover:bg-white/5 text-zinc-500 hover:text-white rounded-full transition-all"
-                 >
-                   <X className="w-5 md:w-6 h-5 md:h-6" />
-                 </button>
-               </div>
-             </div>
+
+              {/* Mode Tabs */}
+              <div className="flex bg-black/40 p-1 rounded-2xl border border-white/5 w-full md:w-auto">
+                <button
+                  onClick={() => setStudioMode('CROP')}
+                  className={clsx(
+                    "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
+                    studioMode === 'CROP' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white disabled:opacity-20 disabled:grayscale"
+                  )}
+                >
+                  <Scissors className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Potong</span>
+                </button>
+                <button
+                  onClick={() => setStudioMode('REFINE')}
+                  className={clsx(
+                    "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
+                    studioMode === 'REFINE' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white"
+                  )}
+                >
+                  <Sparkles className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Refine</span>
+                </button>
+                <button
+                  onClick={() => setStudioMode('CLEANUP')}
+                  className={clsx(
+                    "flex-1 md:flex-none px-3 md:px-6 py-1.5 md:py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center justify-center gap-1.5 md:gap-2",
+                    studioMode === 'CLEANUP' ? "bg-white text-zinc-950 shadow-lg" : "text-zinc-500 hover:text-white"
+                  )}
+                >
+                  <Wand2 className="w-3 md:w-3.5 h-3 md:h-3.5" /> <span>Bersihkan</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setStudioTarget(null); setShowStudioControls(false); }}
+                  className="p-1.5 md:p-2 hover:bg-white/5 text-zinc-500 hover:text-white rounded-full transition-all"
+                >
+                  <X className="w-5 md:w-6 h-5 md:h-6" />
+                </button>
+              </div>
+            </div>
 
             <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
               {/* Main Stage */}
@@ -1862,116 +1915,116 @@ export default function Home() {
                 <div className="absolute inset-0 flex items-center justify-center p-4 md:p-8">
                   {studioMode === 'REFINE' ? (
                     <div className="relative">
-                       <img
+                      <img
                         alt="Refine Target"
                         crossOrigin="anonymous"
                         src={refinedPreviewUrl || stableStudioUrl}
                         className="object-contain block select-none pointer-events-none rounded shadow-2xl transition-all duration-300"
-                        style={{ 
+                        style={{
                           maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
                           maxWidth: '100%'
                         }}
                       />
                       {isRefining && (
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px] rounded">
-                           <Loader2 className="w-10 h-10 animate-spin text-indigo-400" />
+                          <Loader2 className="w-10 h-10 animate-spin text-indigo-400" />
                         </div>
                       )}
                     </div>
                   ) : studioMode === 'CLEANUP' ? (
-                      <div 
-                        className={clsx(
-                          "relative group/cleanup overflow-hidden bg-zinc-950/20 rounded-xl",
-                          (isPanMode || isSpacePressed) ? "cursor-grab active:cursor-grabbing" : cleanupTool === 'ERASER' ? "cursor-none" : "cursor-crosshair"
-                        )}
-                        onWheel={handleWheel}
-                        onPointerMove={(e) => {
-                          const containerRect = e.currentTarget.getBoundingClientRect();
-                          const x = e.clientX - containerRect.left;
-                          const y = e.clientY - containerRect.top;
-                          setBrushCirclePos({ x, y });
+                    <div
+                      className={clsx(
+                        "relative group/cleanup overflow-hidden bg-zinc-950/20 rounded-xl",
+                        (isPanMode || isSpacePressed) ? "cursor-grab active:cursor-grabbing" : cleanupTool === 'ERASER' ? "cursor-none" : "cursor-crosshair"
+                      )}
+                      onWheel={handleWheel}
+                      onPointerMove={(e) => {
+                        const containerRect = e.currentTarget.getBoundingClientRect();
+                        const x = e.clientX - containerRect.left;
+                        const y = e.clientY - containerRect.top;
+                        setBrushCirclePos({ x, y });
 
-                          if (isPanning) {
-                            const dx = e.clientX - lastPanPos.x;
-                            const dy = e.clientY - lastPanPos.y;
-                            setPanOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
-                            setLastPanPos({ x: e.clientX, y: e.clientY });
-                          }
+                        if (isPanning) {
+                          const dx = e.clientX - lastPanPos.x;
+                          const dy = e.clientY - lastPanPos.y;
+                          setPanOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+                          setLastPanPos({ x: e.clientX, y: e.clientY });
+                        }
+                      }}
+                      onPointerDown={(e) => {
+                        if (isPanMode || isSpacePressed || e.button === 1) {
+                          setIsPanning(true);
+                          setLastPanPos({ x: e.clientX, y: e.clientY });
+                        }
+                      }}
+                      onPointerUp={() => setIsPanning(false)}
+                      onPointerLeave={() => { setBrushCirclePos(null); setIsPanning(false); }}
+                    >
+                      <div
+                        style={{
+                          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+                          transformOrigin: 'center center',
+                          transition: isPanning ? 'none' : 'transform 0.1s ease-out'
                         }}
-                        onPointerDown={(e) => {
-                          if (isPanMode || isSpacePressed || e.button === 1) {
-                            setIsPanning(true);
-                            setLastPanPos({ x: e.clientX, y: e.clientY });
-                          }
-                        }}
-                        onPointerUp={() => setIsPanning(false)}
-                        onPointerLeave={() => { setBrushCirclePos(null); setIsPanning(false); }}
                       >
-                        <div 
-                           style={{ 
-                             transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
-                             transformOrigin: 'center center',
-                             transition: isPanning ? 'none' : 'transform 0.1s ease-out'
-                           }}
-                        >
-                          <canvas 
-                            ref={cleanupCanvasRef}
-                            onMouseDown={(e) => {
-                              if (isPanning || isPanMode || isSpacePressed || e.button === 1) return;
-                              saveCleanupState();
-                              if (cleanupTool === 'WAND') handleMagicWand(e);
-                              else handleEraserMove(e);
-                            }}
-                            onTouchStart={(e) => {
-                              if (e.touches.length > 1) {
-                                setIsPanning(true);
-                                setLastPanPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
-                                return;
-                              }
-                              e.preventDefault();
-                              saveCleanupState();
-                              if (cleanupTool === 'WAND') handleMagicWand(e);
-                              else handleEraserMove(e);
-                            }}
-                            onMouseMove={(e) => {
-                              if (isPanning) return;
-                              if (cleanupTool === 'ERASER') handleEraserMove(e);
-                            }}
-                            onTouchMove={(e) => {
-                              if (isPanning) {
-                                const dx = e.touches[0].clientX - lastPanPos.x;
-                                const dy = e.touches[0].clientY - lastPanPos.y;
-                                setPanOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
-                                setLastPanPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
-                                return;
-                              }
-                              e.preventDefault();
-                              if (cleanupTool === 'ERASER') handleEraserMove(e);
-                            }}
-                            onMouseUp={finalizeCleanup}
-                            onTouchEnd={(e) => { e.preventDefault(); finalizeCleanup(); setIsPanning(false); }}
-                            style={{ 
-                              maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
-                              maxWidth: '100%',
-                              height: 'auto'
-                            }}
-                            className="rounded shadow-2xl bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-zinc-800 pointer-events-auto"
-                          />
-                        </div>
-                        
-                        {/* Visual Brush Preview */}
-                        {cleanupTool === 'ERASER' && brushCirclePos && !isPanning && !isPanMode && !isSpacePressed && (
-                          <div 
-                            className="pointer-events-none absolute border border-white/50 rounded-full bg-indigo-500/10 backdrop-blur-[1px] transform -translate-x-1/2 -translate-y-1/2 border-dashed transition-[width,height] duration-75"
-                            style={{
-                              left: brushCirclePos?.x || 0,
-                              top: brushCirclePos?.y || 0,
-                              width: (brushSize * zoom) || 0,
-                              height: (brushSize * zoom) || 0,
-                              boxShadow: '0 0 15px rgba(99, 102, 241, 0.4)'
-                            }}
-                          />
-                        )}
+                        <canvas
+                          ref={cleanupCanvasRef}
+                          onMouseDown={(e) => {
+                            if (isPanning || isPanMode || isSpacePressed || e.button === 1) return;
+                            saveCleanupState();
+                            if (cleanupTool === 'WAND') handleMagicWand(e);
+                            else handleEraserMove(e);
+                          }}
+                          onTouchStart={(e) => {
+                            if (e.touches.length > 1) {
+                              setIsPanning(true);
+                              setLastPanPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+                              return;
+                            }
+                            e.preventDefault();
+                            saveCleanupState();
+                            if (cleanupTool === 'WAND') handleMagicWand(e);
+                            else handleEraserMove(e);
+                          }}
+                          onMouseMove={(e) => {
+                            if (isPanning) return;
+                            if (cleanupTool === 'ERASER') handleEraserMove(e);
+                          }}
+                          onTouchMove={(e) => {
+                            if (isPanning) {
+                              const dx = e.touches[0].clientX - lastPanPos.x;
+                              const dy = e.touches[0].clientY - lastPanPos.y;
+                              setPanOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+                              setLastPanPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+                              return;
+                            }
+                            e.preventDefault();
+                            if (cleanupTool === 'ERASER') handleEraserMove(e);
+                          }}
+                          onMouseUp={finalizeCleanup}
+                          onTouchEnd={(e) => { e.preventDefault(); finalizeCleanup(); setIsPanning(false); }}
+                          style={{
+                            maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
+                            maxWidth: '100%',
+                            height: 'auto'
+                          }}
+                          className="rounded shadow-2xl bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-zinc-800 pointer-events-auto"
+                        />
+                      </div>
+
+                      {/* Visual Brush Preview */}
+                      {cleanupTool === 'ERASER' && brushCirclePos && !isPanning && !isPanMode && !isSpacePressed && (
+                        <div
+                          className="pointer-events-none absolute border border-white/50 rounded-full bg-indigo-500/10 backdrop-blur-[1px] transform -translate-x-1/2 -translate-y-1/2 border-dashed transition-[width,height] duration-75"
+                          style={{
+                            left: brushCirclePos?.x || 0,
+                            top: brushCirclePos?.y || 0,
+                            width: (brushSize * zoom) || 0,
+                            height: (brushSize * zoom) || 0,
+                            boxShadow: '0 0 15px rgba(99, 102, 241, 0.4)'
+                          }}
+                        />
+                      )}
                       {isCleaning && (
                         <div className="absolute inset-0 bg-black/20 flex items-center justify-center pointer-events-none">
                           <Loader2 className="w-10 h-10 animate-spin text-indigo-400" />
@@ -1992,7 +2045,7 @@ export default function Home() {
                         crossOrigin="anonymous"
                         src={stableStudioUrl}
                         onLoad={onImageLoad}
-                        style={{ 
+                        style={{
                           maxHeight: isMobile ? 'calc(100vh - 350px)' : 'calc(100vh - 220px)',
                           maxWidth: '100%'
                         }}
@@ -2004,7 +2057,7 @@ export default function Home() {
 
                 {isMobile && (
                   <div className="absolute bottom-6 right-6 flex flex-col gap-4 z-[90]">
-                    <button 
+                    <button
                       onClick={() => setShowStudioControls(!showStudioControls)}
                       className={clsx(
                         "w-12 h-12 rounded-full flex items-center justify-center shadow-2xl transition-all border",
@@ -2020,18 +2073,18 @@ export default function Home() {
               {/* Sidebar controls */}
               <div className={clsx(
                 "w-full md:w-[320px] bg-zinc-900 border-t md:border-t-0 md:border-l border-white/5 flex flex-col transition-all duration-500 overflow-hidden",
-                isMobile 
+                isMobile
                   ? clsx(
-                      "fixed inset-x-0 bottom-0 z-[100] bg-zinc-950/95 backdrop-blur-2xl rounded-t-[32px] border-t border-white/10 shadow-[0_-8px_40px_rgba(0,0,0,0.8)] p-8 pt-10",
-                      showStudioControls ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
-                    )
+                    "fixed inset-x-0 bottom-0 z-[100] bg-zinc-950/95 backdrop-blur-2xl rounded-t-[32px] border-t border-white/10 shadow-[0_-8px_40px_rgba(0,0,0,0.8)] p-8 pt-10",
+                    showStudioControls ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
+                  )
                   : "p-6 overflow-y-auto"
               )}>
                 {isMobile && (
                   <div className="w-12 h-1.5 bg-white/10 rounded-full absolute top-4 left-1/2 -translate-x-1/2" />
                 )}
                 {isMobile && (
-                  <button 
+                  <button
                     onClick={() => setShowStudioControls(false)}
                     className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white"
                   >
@@ -2063,16 +2116,16 @@ export default function Home() {
                           <p className="text-[10px] text-zinc-500">Undo/Redo tersedia.</p>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <button 
-                            onClick={handleUndo} 
+                          <button
+                            onClick={handleUndo}
                             disabled={cleanupHistory.length === 0}
                             className="p-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-20 text-white rounded-lg transition-all"
                             title="Undo (Ctrl+Z)"
                           >
                             <Undo2 className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={handleRedo} 
+                          <button
+                            onClick={handleRedo}
                             disabled={cleanupRedoStack.length === 0}
                             className="p-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-20 text-white rounded-lg transition-all"
                             title="Redo"
@@ -2084,7 +2137,7 @@ export default function Home() {
 
                       {/* Tool Picker */}
                       <div className="grid grid-cols-3 gap-2 bg-black/20 p-1.5 rounded-2xl border border-white/5">
-                        <button 
+                        <button
                           onClick={() => { setCleanupTool('WAND'); setIsPanMode(false); }}
                           className={clsx(
                             "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95 text-[9px]",
@@ -2094,7 +2147,7 @@ export default function Home() {
                           <Wand2 className="w-3.5 h-3.5" />
                           Wand
                         </button>
-                        <button 
+                        <button
                           onClick={() => { setCleanupTool('ERASER'); setIsPanMode(false); }}
                           className={clsx(
                             "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95 text-[9px]",
@@ -2104,7 +2157,7 @@ export default function Home() {
                           <Eraser className="w-3.5 h-3.5" />
                           Eraser
                         </button>
-                        <button 
+                        <button
                           onClick={() => setIsPanMode(!isPanMode)}
                           className={clsx(
                             "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all active:scale-95 text-[9px]",
@@ -2118,64 +2171,64 @@ export default function Home() {
 
                       {/* Zoom Controls */}
                       <div className="flex items-center gap-2 bg-black/40 p-2 rounded-xl border border-white/5">
-                         <button onClick={() => setZoom(prev => Math.max(0.5, prev - 0.2))} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white">
-                           <ZoomOut className="w-4 h-4" />
-                         </button>
-                         <div className="flex-1 text-center text-[10px] font-black text-indigo-400 tabular-nums">
-                           {Math.round(zoom * 100)}%
-                         </div>
-                         <button onClick={() => setZoom(prev => Math.min(10, prev + 0.2))} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white">
-                           <ZoomIn className="w-4 h-4" />
-                         </button>
-                         <button onClick={() => { setZoom(1); setPanOffset({x:0, y:0}); }} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white" title="Reset Zoom">
-                           <Maximize className="w-4 h-4" />
-                         </button>
+                        <button onClick={() => setZoom(prev => Math.max(0.5, prev - 0.2))} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white">
+                          <ZoomOut className="w-4 h-4" />
+                        </button>
+                        <div className="flex-1 text-center text-[10px] font-black text-indigo-400 tabular-nums">
+                          {Math.round(zoom * 100)}%
+                        </div>
+                        <button onClick={() => setZoom(prev => Math.min(10, prev + 0.2))} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white">
+                          <ZoomIn className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => { setZoom(1); setPanOffset({ x: 0, y: 0 }); }} className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white" title="Reset Zoom">
+                          <Maximize className="w-4 h-4" />
+                        </button>
                       </div>
 
                       <div className="space-y-6 pt-2 h-40">
-                      {isPanMode || isSpacePressed ? (
-                        <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
-                           <div className="flex flex-col gap-1">
-                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold text-center">Pan Mode Active</span>
-                            <p className="text-[10px] text-zinc-500 text-center">Seret gambar untuk berpindah posisi.</p>
-                          </div>
-                        </div>
-                      ) : cleanupTool === 'WAND' ? (
-                        <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Wand Settings</span>
-                            <p className="text-[10px] text-zinc-500">Klik warna untuk menghapus area besar.</p>
-                          </div>
-                          <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-4">
-                            <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
-                              <span>Toleransi Warna</span>
-                              <span>{wandTolerance}%</span>
+                        {isPanMode || isSpacePressed ? (
+                          <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold text-center">Pan Mode Active</span>
+                              <p className="text-[10px] text-zinc-500 text-center">Seret gambar untuk berpindah posisi.</p>
                             </div>
-                            <input type="range" min="1" max="100" value={wandTolerance} onChange={(e) => setWandTolerance(parseInt(e.target.value))} className="w-full accent-indigo-500" />
                           </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Eraser Settings</span>
-                            <p className="text-[10px] text-zinc-500">Seret untuk menghapus detail manual.</p>
-                          </div>
-                          <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-4">
-                            <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
-                              <span>Ukuran Kuas</span>
-                              <span>{brushSize}px</span>
+                        ) : cleanupTool === 'WAND' ? (
+                          <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Wand Settings</span>
+                              <p className="text-[10px] text-zinc-500">Klik warna untuk menghapus area besar.</p>
                             </div>
-                            <input type="range" min="1" max="100" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                            <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-4">
+                              <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
+                                <span>Toleransi Warna</span>
+                                <span>{wandTolerance}%</span>
+                              </div>
+                              <input type="range" min="1" max="100" value={wandTolerance} onChange={(e) => setWandTolerance(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        ) : (
+                          <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <div className="flex flex-col gap-1">
+                              <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Eraser Settings</span>
+                              <p className="text-[10px] text-zinc-500">Seret untuk menghapus detail manual.</p>
+                            </div>
+                            <div className="bg-black/40 p-4 rounded-2xl border border-white/5 space-y-4">
+                              <div className="flex justify-between items-center text-xs font-bold text-zinc-400">
+                                <span>Ukuran Kuas</span>
+                                <span>{brushSize}px</span>
+                              </div>
+                              <input type="range" min="1" max="100" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
 
                   {studioMode === 'CROP' && (
                     <div className="space-y-6">
-                       <div className="flex flex-col gap-1">
+                      <div className="flex flex-col gap-1">
                         <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Aspect Ratio</span>
                         <p className="text-[10px] text-zinc-500">Sesuaikan bentuk potongan gambar.</p>
                       </div>
@@ -2191,16 +2244,16 @@ export default function Home() {
                           <button
                             key={ratio.label}
                             onClick={() => {
-                                setCropAspect(ratio.val);
-                                if (imgRef.current) {
-                                   const { width: dW, height: dH } = imgRef.current;
-                                   const imgA = dW / dH;
-                                   let nC: Crop;
-                                   if (ratio.val) {
-                                     nC = centerCrop(makeAspectCrop({ unit: '%', [imgA > ratio.val ? 'height' : 'width']: 100 }, ratio.val, dW, dH), dW, dH);
-                                   } else { nC = { unit: '%', x: 0, y: 0, width: 100, height: 100 }; }
-                                   setCrop(nC);
-                                }
+                              setCropAspect(ratio.val);
+                              if (imgRef.current) {
+                                const { width: dW, height: dH } = imgRef.current;
+                                const imgA = dW / dH;
+                                let nC: Crop;
+                                if (ratio.val) {
+                                  nC = centerCrop(makeAspectCrop({ unit: '%', [imgA > ratio.val ? 'height' : 'width']: 100 }, ratio.val, dW, dH), dW, dH);
+                                } else { nC = { unit: '%', x: 0, y: 0, width: 100, height: 100 }; }
+                                setCrop(nC);
+                              }
                             }}
                             className={clsx(
                               "py-2.5 rounded-xl font-bold flex flex-col items-center justify-center border transition-all active:scale-95 text-[10px]",
@@ -2216,7 +2269,7 @@ export default function Home() {
                 </div>
 
                 <div className="pt-6 border-t border-white/5">
-                  <button 
+                  <button
                     onClick={() => {
                       if (studioMode === 'CROP') handleSaveCrop();
                       else if (studioMode === 'CLEANUP') handleSaveCleanup();
@@ -2238,84 +2291,84 @@ export default function Home() {
       {/* --- VECTOR ENTRANCE MODAL WITH PASSWORD (v12.1) --- */}
       {isVectorWarningOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="w-full max-w-xl glass-panel p-1 border border-white/20 rounded-[2.5rem] shadow-2xl relative overflow-hidden">
-              <div className="absolute inset-x-0 -top-12 -bottom-12 bg-gradient-to-br from-emerald-500/20 via-transparent to-cyan-500/20 blur-3xl" />
-              <div className="relative bg-zinc-950/80 rounded-[2rem] p-10 flex flex-col items-center">
-                 <div className="w-24 h-24 bg-gradient-to-br from-emerald-500 to-cyan-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-500/40 mb-8 animate-in zoom-in-50 duration-500">
-                    <Lock className="w-12 h-12 text-zinc-950" />
-                 </div>
-                 <h2 className="text-3xl font-black text-white text-center mb-4 tracking-tight">Autorisasi Diperlukan</h2>
-                 <p className="text-zinc-400 text-center mb-6 leading-relaxed max-w-[360px]">
-                    Halaman ini memiliki biaya operasional tinggi. Silakan masukkan **Vector Access PIN** untuk melanjutkan.
-                 </p>
-                 
-                 <div className="w-full mb-8">
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-500/50" />
-                      <input 
-                        type="password" 
-                        value={vectorPinInput}
-                        onChange={(e) => setVectorPinInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && vectorPinInput === VECTOR_PIN) {
-                            setIsVectorAuthenticated(true);
-                            setIsVectorWarningOpen(false);
-                            setVectorPinInput("");
-                          }
-                        }}
-                        placeholder="ENTER ACCESS PIN..." 
-                        className="w-full py-4 pl-12 pr-4 bg-white/5 border border-white/10 rounded-2xl text-center font-black tracking-[0.5em] text-emerald-400 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all"
-                      />
-                    </div>
-                    {vectorPinInput && vectorPinInput !== VECTOR_PIN && (
-                      <p className="text-red-400 text-[10px] font-bold text-center mt-2 uppercase tracking-widest animate-pulse">PIN TIDAK VALID</p>
-                    )}
-                 </div>
-
-                 <div className="grid grid-cols-1 w-full gap-4">
-                    <button 
-                      onClick={() => {
-                        if (vectorPinInput === VECTOR_PIN) {
-                          setIsVectorAuthenticated(true);
-                          setIsVectorWarningOpen(false);
-                          setVectorPinInput("");
-                        }
-                      }} 
-                      disabled={vectorPinInput !== VECTOR_PIN}
-                      className="py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:grayscale text-zinc-950 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-emerald-500/20 transition-all hover:scale-[1.02] active:scale-95"
-                    >
-                       Akses Vector Studio
-                    </button>
-                    <button onClick={() => { setActiveTab("generator"); setIsVectorWarningOpen(false); setVectorPinInput(""); }} className="py-4 text-zinc-500 hover:text-white transition-colors text-sm font-bold">
-                       Kembali ke AI Generator
-                    </button>
-                 </div>
+          <div className="w-full max-w-xl glass-panel p-1 border border-white/20 rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+            <div className="absolute inset-x-0 -top-12 -bottom-12 bg-gradient-to-br from-emerald-500/20 via-transparent to-cyan-500/20 blur-3xl" />
+            <div className="relative bg-zinc-950/80 rounded-[2rem] p-10 flex flex-col items-center">
+              <div className="w-24 h-24 bg-gradient-to-br from-emerald-500 to-cyan-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-500/40 mb-8 animate-in zoom-in-50 duration-500">
+                <Lock className="w-12 h-12 text-zinc-950" />
               </div>
-           </div>
+              <h2 className="text-3xl font-black text-white text-center mb-4 tracking-tight">Autorisasi Diperlukan</h2>
+              <p className="text-zinc-400 text-center mb-6 leading-relaxed max-w-[360px]">
+                Halaman ini memiliki biaya operasional tinggi. Silakan masukkan **Vector Access PIN** untuk melanjutkan.
+              </p>
+
+              <div className="w-full mb-8">
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-500/50" />
+                  <input
+                    type="password"
+                    value={vectorPinInput}
+                    onChange={(e) => setVectorPinInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && vectorPinInput === VECTOR_PIN) {
+                        setIsVectorAuthenticated(true);
+                        setIsVectorWarningOpen(false);
+                        setVectorPinInput("");
+                      }
+                    }}
+                    placeholder="ENTER ACCESS PIN..."
+                    className="w-full py-4 pl-12 pr-4 bg-white/5 border border-white/10 rounded-2xl text-center font-black tracking-[0.5em] text-emerald-400 focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all"
+                  />
+                </div>
+                {vectorPinInput && vectorPinInput !== VECTOR_PIN && (
+                  <p className="text-red-400 text-[10px] font-bold text-center mt-2 uppercase tracking-widest animate-pulse">PIN TIDAK VALID</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 w-full gap-4">
+                <button
+                  onClick={() => {
+                    if (vectorPinInput === VECTOR_PIN) {
+                      setIsVectorAuthenticated(true);
+                      setIsVectorWarningOpen(false);
+                      setVectorPinInput("");
+                    }
+                  }}
+                  disabled={vectorPinInput !== VECTOR_PIN}
+                  className="py-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 disabled:grayscale text-zinc-950 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-emerald-500/20 transition-all hover:scale-[1.02] active:scale-95"
+                >
+                  Akses Vector Studio
+                </button>
+                <button onClick={() => { setActiveTab("generator"); setIsVectorWarningOpen(false); setVectorPinInput(""); }} className="py-4 text-zinc-500 hover:text-white transition-colors text-sm font-bold">
+                  Kembali ke AI Generator
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
       {/* --- PRO SWITCH WARNING MODAL (v12.0) --- */}
       {isProSwitchModalOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-           <div className="w-full max-w-md glass-panel p-1 border border-emerald-500/30 rounded-[2rem] shadow-2xl">
-              <div className="bg-zinc-950/90 rounded-[1.8rem] p-8 flex flex-col items-center">
-                 <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-full flex items-center justify-center mb-6">
-                    <AlertCircle className="w-8 h-8 text-amber-500" />
-                 </div>
-                 <h3 className="text-xl font-bold text-white mb-3 text-center tracking-tight">Aktifkan Pro Vector Mode?</h3>
-                 <p className="text-zinc-500 text-sm text-center mb-8 px-4 leading-relaxed">
-                    Model **Recraft V4 Pro** menghasilkan detail geometris yang jauh lebih halus.
-                    Biaya API meningkat menjadi <span className="text-amber-400 font-bold">$0.30 per gambar</span>.
-                 </p>
-                 <div className="flex flex-col w-full gap-3">
-                    <button onClick={() => { setIsVectorPro(true); setIsProSwitchModalOpen(false); }} className="w-full py-4 bg-emerald-500 text-zinc-950 font-black rounded-xl uppercase tracking-widest shadow-xl shadow-emerald-500/20">
-                       Aktifkan Mode Pro
-                    </button>
-                    <button onClick={() => setIsProSwitchModalOpen(false)} className="w-full py-4 text-zinc-500 font-bold">Batal</button>
-                 </div>
+          <div className="w-full max-w-md glass-panel p-1 border border-emerald-500/30 rounded-[2rem] shadow-2xl">
+            <div className="bg-zinc-950/90 rounded-[1.8rem] p-8 flex flex-col items-center">
+              <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-full flex items-center justify-center mb-6">
+                <AlertCircle className="w-8 h-8 text-amber-500" />
               </div>
-           </div>
+              <h3 className="text-xl font-bold text-white mb-3 text-center tracking-tight">Aktifkan Pro Vector Mode?</h3>
+              <p className="text-zinc-500 text-sm text-center mb-8 px-4 leading-relaxed">
+                Model **Recraft V4 Pro** menghasilkan detail geometris yang jauh lebih halus.
+                Biaya API meningkat menjadi <span className="text-amber-400 font-bold">$0.30 per gambar</span>.
+              </p>
+              <div className="flex flex-col w-full gap-3">
+                <button onClick={() => { setIsVectorPro(true); setIsProSwitchModalOpen(false); }} className="w-full py-4 bg-emerald-500 text-zinc-950 font-black rounded-xl uppercase tracking-widest shadow-xl shadow-emerald-500/20">
+                  Aktifkan Mode Pro
+                </button>
+                <button onClick={() => setIsProSwitchModalOpen(false)} className="w-full py-4 text-zinc-500 font-bold">Batal</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -2323,24 +2376,24 @@ export default function Home() {
 }
 
 function VectorStickerCard({ img, onDelete, onPreview }: {
-  img: {id: string, url: string, timestamp: number, isPro: boolean},
+  img: { id: string, url: string, timestamp: number, isPro: boolean },
   onDelete: () => void,
   onPreview: (url: string) => void
 }) {
   const [showMenu, setShowMenu] = useState(false);
 
   return (
-    <div 
+    <div
       className="group relative aspect-square rounded-2xl overflow-hidden bg-zinc-900 border border-white/5 hover:border-indigo-500/50 transition-all shadow-xl cursor-pointer"
       onClick={() => setShowMenu(!showMenu)}
     >
-       {/* v12.0: Checkered Background for Vector Preview */}
+      {/* v12.0: Checkered Background for Vector Preview */}
       <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'conic-gradient(#fff 0.25turn, #000 0.25turn 0.5turn, #fff 0.5turn 0.75turn, #000 0.75turn)', backgroundSize: '20px 20px' }} />
-      
+
       <div className="absolute inset-0 flex items-center justify-center p-4">
-        <img 
-          src={img.url} 
-          alt="Vector Result" 
+        <img
+          src={img.url}
+          alt="Vector Result"
           className="max-w-full max-h-full object-contain drop-shadow-2xl transition-transform group-hover:scale-105"
           onClick={(e) => {
             if (window.innerWidth < 768) {
@@ -2375,7 +2428,7 @@ function VectorStickerCard({ img, onDelete, onPreview }: {
         showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
       )}>
         {showMenu && (
-          <button 
+          <button
             onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
             className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full text-white/60 sm:hidden z-30 border border-white/10"
           >
@@ -2384,7 +2437,7 @@ function VectorStickerCard({ img, onDelete, onPreview }: {
         )}
 
         <div className="flex w-full gap-2">
-          <button 
+          <button
             onClick={(e) => { e.stopPropagation(); onPreview(img.url); }}
             className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-all hover:scale-105 active:scale-95 px-1 border border-white/5"
             title="Preview"
@@ -2392,9 +2445,9 @@ function VectorStickerCard({ img, onDelete, onPreview }: {
             <Maximize className="w-4 h-4" />
             <span className="text-[7px] font-bold mt-0.5 hidden sm:inline">VIEW</span>
           </button>
-          <button 
-            onClick={(e) => { 
-              e.stopPropagation(); 
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
               saveAs(img.url, `vector_${img.id}.svg`);
             }}
             className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-all hover:scale-105 active:scale-95 px-1 border border-emerald-500/20"
@@ -2403,7 +2456,7 @@ function VectorStickerCard({ img, onDelete, onPreview }: {
             <Download className="w-4 h-4" />
             <span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline text-white">SAVE</span>
           </button>
-          <button 
+          <button
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
             className="flex-1 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-500 rounded-lg flex flex-col items-center justify-center transition-all hover:scale-105 active:scale-95 px-1 border border-red-500/20"
             title="Delete"
@@ -2432,9 +2485,9 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showTools, setShowTools] = useState(false);
-  
+
   return (
-    <div 
+    <div
       className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group animate-in zoom-in-50 duration-500 cursor-pointer"
       onClick={() => setShowMenu(!showMenu)}
     >
@@ -2450,10 +2503,10 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
             <p className="text-white text-sm font-semibold animate-pulse">Menajamkan 4K...</p>
           </div>
         )}
-        <img 
-          src={img.upscaledUrl || img.url} 
-          alt="Sticker" 
-          className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110" 
+        <img
+          src={img.upscaledUrl || img.url}
+          alt="Sticker"
+          className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-110"
         />
       </div>
 
@@ -2469,7 +2522,7 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
         img.isUpscaling ? "hidden" : showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
       )}>
         {showMenu && (
-          <button 
+          <button
             onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
             className="absolute top-2 right-2 p-1.5 bg-white/20 hover:bg-white/30 backdrop-blur-xl rounded-full text-white sm:hidden z-30 border border-white/10 transition-transform active:scale-90"
           >
@@ -2479,9 +2532,9 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
 
         <div className="w-full grid grid-cols-2 gap-2">
           {!img.upscaledUrl ? (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onUpscale(); }} 
-              disabled={globalLock || img.isUpscaling} 
+            <button
+              onClick={(e) => { e.stopPropagation(); onUpscale(); }}
+              disabled={globalLock || img.isUpscaling}
               className="w-full py-2 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white rounded-lg border border-white/10 disabled:opacity-40 transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
             >
               <Sparkles className="w-4 h-4" />
@@ -2493,11 +2546,11 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
               <ShieldCheck className="w-4 h-4" /> <span className="text-[9px] uppercase tracking-tight hidden sm:inline">4K READY</span>
             </div>
           )}
-          
+
           <div className="relative">
-            <button 
-              onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} 
-              className="w-full h-full py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-lg flex flex-col items-center justify-center transition-colors group/tools border border-white/10" 
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }}
+              className="w-full h-full py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 rounded-lg flex flex-col items-center justify-center transition-colors group/tools border border-white/10"
               title="Studio Tools"
             >
               <Wrench className="w-4 h-4" />
@@ -2507,20 +2560,20 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
               "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-32 bg-zinc-950/90 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] transition-all p-1.5 flex flex-col gap-1 z-[60]",
               showTools ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none group-hover/tools:opacity-100 group-hover/tools:scale-100 group-hover/tools:pointer-events-auto"
             )}>
-               <div className="absolute top-full left-0 right-0 h-4" />
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('CROP'); }} 
-                  className="w-full py-2 px-3 hover:bg-amber-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-amber-400 border border-transparent hover:border-amber-500/30 transition-all"
-                >
-                  <Scissors className="w-4 h-4" /> Potong
-                </button>
-                <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('CLEANUP'); }} 
-                  className="w-full py-2 px-3 hover:bg-indigo-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-indigo-400 border border-transparent hover:border-indigo-500/30 transition-all"
-                >
-                  <Wand2 className="w-4 h-4" /> Cleanup
-                </button>
+              <div className="absolute top-full left-0 right-0 h-4" />
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('CROP'); }}
+                className="w-full py-2 px-3 hover:bg-amber-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-amber-400 border border-transparent hover:border-amber-500/30 transition-all"
+              >
+                <Scissors className="w-4 h-4" /> Potong
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine('CLEANUP'); }}
+                className="w-full py-2 px-3 hover:bg-indigo-500/20 rounded-xl text-[10px] font-bold flex items-center gap-1.5 text-indigo-400 border border-transparent hover:border-indigo-500/30 transition-all"
+              >
+                <Wand2 className="w-4 h-4" /> Cleanup
+              </button>
             </div>
           </div>
         </div>
@@ -2535,45 +2588,45 @@ function StickerCard({ img, onUpscale, onPreview, onRefine, onDelete, globalLock
   );
 }
 
-function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine, onDelete, globalLock, upscaleCooldownTime, isManualBatchProcessing, isGenerating }: { 
-  img: any, 
-  idx: number, 
-  onManualAction: (idx: number, type: "remove_bg" | "upscale") => void, 
-  onCropOpen: (idx: number) => void, 
-  onPreview: (url: string) => void, 
+function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine, onDelete, globalLock, upscaleCooldownTime, isManualBatchProcessing, isGenerating }: {
+  img: any,
+  idx: number,
+  onManualAction: (idx: number, type: "remove_bg" | "upscale") => void,
+  onCropOpen: (idx: number) => void,
+  onPreview: (url: string) => void,
   onRefine: (idx: number, initialMode?: 'REFINE' | 'CLEANUP' | 'CROP') => void,
-  onDelete: (id: string) => void, 
-  globalLock: boolean, 
-  upscaleCooldownTime: number, 
-  isManualBatchProcessing: boolean, 
-  isGenerating: boolean 
+  onDelete: (id: string) => void,
+  globalLock: boolean,
+  upscaleCooldownTime: number,
+  isManualBatchProcessing: boolean,
+  isGenerating: boolean
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showTools, setShowTools] = useState(false);
 
   return (
-    <div 
+    <div
       className="aspect-square bg-white/5 border border-white/5 rounded-xl relative group animate-in fade-in duration-300 cursor-pointer"
       onClick={() => setShowMenu(!showMenu)}
     >
-       <div className="absolute inset-0 overflow-hidden rounded-xl z-0">
-          {!showMenu && (
-            <div className="absolute top-2 left-2 flex gap-1 z-20">
-               {img.url !== img.originalUrl && <div className="bg-indigo-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">B-FREE</div>}
-               {img.upscaledUrl && <div className="bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">4K</div>}
-            </div>
-          )}
-          {(img.isProcessing || img.isUpscaling) && (
-             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-30 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
-             </div>
-          )}
-          <img 
-            src={img.upscaledUrl || img.url} 
-            alt="Manual" 
-            className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" 
-          />
-       </div>
+      <div className="absolute inset-0 overflow-hidden rounded-xl z-0">
+        {!showMenu && (
+          <div className="absolute top-2 left-2 flex gap-1 z-20">
+            {img.url !== img.originalUrl && <div className="bg-indigo-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">B-FREE</div>}
+            {img.upscaledUrl && <div className="bg-emerald-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-sm">4K</div>}
+          </div>
+        )}
+        {(img.isProcessing || img.isUpscaling) && (
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] z-30 flex items-center justify-center">
+            <Loader2 className="w-8 h-8 animate-spin text-pink-500" />
+          </div>
+        )}
+        <img
+          src={img.upscaledUrl || img.url}
+          alt="Manual"
+          className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105"
+        />
+      </div>
 
       <div className={clsx(
         "absolute top-3 right-3 text-white/40 sm:hidden transition-opacity z-20",
@@ -2582,74 +2635,74 @@ function ManualCard({ img, idx, onManualAction, onCropOpen, onPreview, onRefine,
         <MoreVertical className="w-5 h-5 drop-shadow-lg" />
       </div>
 
-       <div className={clsx(
-         "absolute -inset-[1.5px] bg-zinc-950 transition-all duration-300 z-10 flex flex-col items-center justify-center pt-8 pb-4 px-4 gap-3 rounded-xl border border-white/20 shadow-2xl overflow-visible",
-         (img.isProcessing || img.isUpscaling) ? "hidden" : showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
-       )}>
-          {showMenu && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
-               className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full text-white/60 sm:hidden z-30 border border-white/10"
-             >
-               <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+      <div className={clsx(
+        "absolute -inset-[1.5px] bg-zinc-950 transition-all duration-300 z-10 flex flex-col items-center justify-center pt-8 pb-4 px-4 gap-3 rounded-xl border border-white/20 shadow-2xl overflow-visible",
+        (img.isProcessing || img.isUpscaling) ? "hidden" : showMenu ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+      )}>
+        {showMenu && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowMenu(false); }}
+            className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-white/20 backdrop-blur-xl rounded-full text-white/60 sm:hidden z-30 border border-white/10"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
 
-          <div className="grid grid-cols-3 gap-2 w-full">
-             <button 
-               onClick={(e) => { e.stopPropagation(); onManualAction(idx, "remove_bg"); }} 
-               disabled={img.isProcessing || img.isBackgroundRemoved || globalLock} 
-               className="py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 disabled:opacity-40 transition-colors"
-               title="Remove BG"
-             >
-                <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">HAPUS BG</span>
-             </button>
-             <button 
-               onClick={(e) => { e.stopPropagation(); onManualAction(idx, "upscale"); }} 
-               disabled={img.isUpscaling || !!img.upscaledUrl || globalLock} 
-               className="py-2.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg flex flex-col items-center justify-center gap-1 shadow-lg shadow-indigo-500/20 disabled:opacity-40 transition-colors"
-               title="Upscale 4K"
-             >
-                <Sparkles className="w-4 h-4" />
-                <span className="text-[8px] font-bold hidden sm:inline text-white text-center">UPSCALE 4K</span>
-             </button>
-             <div className="relative flex-1">
-                <button 
-                  onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }} 
-                  className="w-full h-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 transition-colors group/tools"
-                  title="Studio Tools"
-                >
-                   <Wrench className="w-4 h-4 text-emerald-400" />
-                   <span className="text-[8px] font-bold hidden sm:inline text-zinc-400 uppercase tracking-tighter">Tools</span>
-                </button>
-                <div className={clsx(
-                  "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-36 bg-zinc-950/90 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] transition-all p-2 flex flex-col gap-1.5 z-[60]",
-                  showTools ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none group-hover/tools:opacity-100 group-hover/tools:scale-100 group-hover/tools:pointer-events-auto"
-                )}>
-                  <div className="absolute top-full left-0 right-0 h-4" />
-                  <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onCropOpen(idx); }} className="w-full py-2 px-3 hover:bg-amber-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-amber-400 border border-transparent hover:border-amber-500/30 transition-all"><Scissors className="w-4 h-4" /> Potong</button>
-                  <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine(idx, 'REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
-                  <button 
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      setShowTools(false);
-                      onRefine(idx, 'CLEANUP'); 
-                    }} 
-                    className="w-full py-2 px-3 hover:bg-indigo-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-indigo-400 border border-transparent hover:border-indigo-500/30 transition-all"
-                  >
-                    <Wand2 className="w-4 h-4" /> Cleanup
-                  </button>
-                </div>
-             </div>
+        <div className="grid grid-cols-3 gap-2 w-full">
+          <button
+            onClick={(e) => { e.stopPropagation(); onManualAction(idx, "remove_bg"); }}
+            disabled={img.isProcessing || img.isBackgroundRemoved || globalLock}
+            className="py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 disabled:opacity-40 transition-colors"
+            title="Remove BG"
+          >
+            <ShieldCheck className="w-4 h-4 text-indigo-400" />
+            <span className="text-[8px] font-bold hidden sm:inline text-zinc-400">HAPUS BG</span>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onManualAction(idx, "upscale"); }}
+            disabled={img.isUpscaling || !!img.upscaledUrl || globalLock}
+            className="py-2.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg flex flex-col items-center justify-center gap-1 shadow-lg shadow-indigo-500/20 disabled:opacity-40 transition-colors"
+            title="Upscale 4K"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="text-[8px] font-bold hidden sm:inline text-white text-center">UPSCALE 4K</span>
+          </button>
+          <div className="relative flex-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowTools(!showTools); }}
+              className="w-full h-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center gap-1 border border-white/10 transition-colors group/tools"
+              title="Studio Tools"
+            >
+              <Wrench className="w-4 h-4 text-emerald-400" />
+              <span className="text-[8px] font-bold hidden sm:inline text-zinc-400 uppercase tracking-tighter">Tools</span>
+            </button>
+            <div className={clsx(
+              "absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-36 bg-zinc-950/90 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] transition-all p-2 flex flex-col gap-1.5 z-[60]",
+              showTools ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none group-hover/tools:opacity-100 group-hover/tools:scale-100 group-hover/tools:pointer-events-auto"
+            )}>
+              <div className="absolute top-full left-0 right-0 h-4" />
+              <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onCropOpen(idx); }} className="w-full py-2 px-3 hover:bg-amber-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-amber-400 border border-transparent hover:border-amber-500/30 transition-all"><Scissors className="w-4 h-4" /> Potong</button>
+              <button onClick={(e) => { e.stopPropagation(); setShowTools(false); onRefine(idx, 'REFINE'); }} className="w-full py-2 px-3 hover:bg-emerald-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-emerald-400 border border-transparent hover:border-emerald-500/30 transition-all"><Sparkles className="w-4 h-4" /> Refine</button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowTools(false);
+                  onRefine(idx, 'CLEANUP');
+                }}
+                className="w-full py-2 px-3 hover:bg-indigo-500/20 rounded-xl text-[11px] font-bold flex items-center gap-2 text-indigo-400 border border-transparent hover:border-indigo-500/30 transition-all"
+              >
+                <Wand2 className="w-4 h-4" /> Cleanup
+              </button>
+            </div>
           </div>
-          
-          <div className="flex w-full gap-2 border-t border-white/10 pt-3">
-            <button onClick={(e) => { e.stopPropagation(); onPreview(img.upscaledUrl || img.url); }} className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Preview"><Maximize className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">VIEW</span></button>
-            <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, `Sticker_${idx}.png`); }} className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-colors shadow-inner px-1" title="Download"><Download className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline">Download</span></button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete(img.id); }} className="flex-1 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-500 rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Delete"><Trash2 className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 uppercase tracking-widest hidden sm:inline">Delete</span></button>
-          </div>
-       </div>
+        </div>
+
+        <div className="flex w-full gap-2 border-t border-white/10 pt-3">
+          <button onClick={(e) => { e.stopPropagation(); onPreview(img.upscaledUrl || img.url); }} className="flex-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Preview"><Maximize className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 hidden sm:inline">VIEW</span></button>
+          <button onClick={(e) => { e.stopPropagation(); saveAs(img.upscaledUrl || img.url, `Sticker_${idx}.png`); }} className="flex-1 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg flex flex-col items-center justify-center transition-colors shadow-inner px-1" title="Download"><Download className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 text-center uppercase tracking-tighter hidden sm:inline">Download</span></button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(img.id); }} className="flex-1 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-500 rounded-lg flex flex-col items-center justify-center transition-colors px-1" title="Delete"><Trash2 className="w-3.5 h-3.5" /><span className="text-[7px] font-bold mt-0.5 uppercase tracking-widest hidden sm:inline">Delete</span></button>
+        </div>
+      </div>
     </div>
   );
 }

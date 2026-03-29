@@ -254,7 +254,7 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
         }
 
         else if (action === "generate_vector") {
-            const { prompt, stylePrefix, isPro } = body;
+            const { prompt, stylePrefix, isPro, aspect_ratio } = body;
             if (!prompt) return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
 
             // Recraft V4 SVG Models on Replicate
@@ -270,7 +270,7 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
                 modelName,
                 {
                     prompt: finalPrompt,
-                    aspect_ratio: "1:1"
+                    aspect_ratio: aspect_ratio || "1:1"
                 },
                 replicateToken
             );
