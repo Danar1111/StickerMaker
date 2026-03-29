@@ -87,6 +87,52 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// GET: Scan and list files for Gallery Sync (v12.5)
+export async function GET(req: NextRequest) {
+    if (!validatePin(req)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    try {
+        const categories = ['gen', 'manual', 'vector'];
+        const results: Record<string, any[]> = { gen: [], manual: [], vector: [] };
+
+        for (const cat of categories) {
+            const dirPath = path.join(process.cwd(), 'public', 'outputs', cat);
+            
+            // Check if directory exists
+            try {
+                await fs.access(dirPath);
+            } catch {
+                continue; // Skip if folder doesn't exist yet
+            }
+
+            const files = await fs.readdir(dirPath);
+            const fileDetails = await Promise.all(
+                files.map(async (file) => {
+                    const filePath = path.join(dirPath, file);
+                    const stats = await fs.stat(filePath);
+                    return {
+                        name: file,
+                        url: `/outputs/${cat}/${file}`,
+                        mtime: stats.mtimeMs
+                    };
+                })
+            );
+
+            // Sort by mtime DESC (Newest First)
+            results[cat] = fileDetails
+                .sort((a, b) => b.mtime - a.mtime)
+                .map(f => ({ url: f.url, mtime: f.mtime }));
+        }
+
+        return NextResponse.json(results);
+    } catch (error: any) {
+        console.error("Storage GET API Error:", error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
 // DELETE: Explicitly remove a physical file
 export async function DELETE(req: NextRequest) {
     if (!validatePin(req)) {

@@ -299,6 +299,53 @@ export default function Home() {
     // Append a stable timestamp for the current sticker to break CORS cache per session
     return `${url}?t=studio-${studioTarget.tab}-${studioTarget.idx}`;
   }, [studioTarget, generatedImages, manualImages]);
+  
+  const syncGalleryWithVPS = async (pin?: string) => {
+    const activePin = pin || sessionPin;
+    if (!activePin) return;
+    setIsSyncingToVPS(true);
+    try {
+      const res = await fetch('/api/storage', {
+        headers: { 'X-Admin-PIN': activePin }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      
+      // Sync AI Generator (gen)
+      if (data.gen) {
+        setGeneratedImages(data.gen.map((item: any) => ({
+          url: item.url,
+          // Note: we just show the final version stored on disk
+        })));
+      }
+
+      // Sync Manual Tool
+      if (data.manual) {
+        setManualImages(data.manual.map((item: any) => ({
+          id: item.url,
+          originalUrl: item.url,
+          url: item.url,
+          isProcessing: false,
+          isUpscaling: false,
+          isBackgroundRemoved: false 
+        })));
+      }
+
+      // Sync Vector Studio
+      if (data.vector) {
+        setVectorImages(data.vector.map((item: any) => ({
+          id: item.url,
+          url: item.url,
+          timestamp: item.mtime,
+          isPro: false 
+        })));
+      }
+    } catch (err) {
+      console.error("Gallery Sync Error:", err);
+    } finally {
+      setIsSyncingToVPS(false);
+    }
+  };
 
   useEffect(() => {
     setIsClient(true);
@@ -306,6 +353,7 @@ export default function Home() {
     if (savedPin) {
        setSessionPin(savedPin);
        setIsAuthenticated(true);
+       syncGalleryWithVPS(savedPin); // Initial sync on mount if authed
     } else {
        setIsAuthenticated(false);
     }
@@ -513,6 +561,7 @@ export default function Home() {
         localStorage.setItem("admin_pin", pinInput);
         setSessionPin(pinInput);
         setIsAuthenticated(true);
+        syncGalleryWithVPS(pinInput); // Sync immediately after login
     } catch (err) {
         setAuthError("Gagal verifikasi.");
     }
