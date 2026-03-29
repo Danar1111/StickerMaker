@@ -779,7 +779,8 @@ export default function Home() {
 
        // v12.3: Save Upscaled result to VPS (replace old if exists)
        setProgressText(`Storing 4K local copy...`);
-       const localPath = await saveFileLocally(data.imageUrl, 'gen', newData[index].url, ['4k']);
+       const existingTags = ['rbg']; // Gen is always rbg
+       const localPath = await saveFileLocally(data.imageUrl, 'gen', newData[index].url, [...existingTags, '4k']);
        
        newData[index].upscaledUrl = localPath;
        newData[index].url = localPath; // Auto-promote to new main URL if upscaled
@@ -879,8 +880,11 @@ export default function Home() {
       
       // v12.4: Save Studio result to VPS and clean up old file
       const isManualRbg = tab === 'manual' && (target as any).isBackgroundRemoved;
-      const tags = tab === 'gen' ? ['rbg'] : (isManualRbg ? ['rbg'] : undefined);
-      const localUrl = await saveFileLocally(croppedImage, tab === 'gen' ? 'gen' : 'manual', target.url, tags);
+      const is4k = !!target.upscaledUrl;
+      const currentTags = [];
+      if (tab === 'gen' || isManualRbg) currentTags.push('rbg');
+      if (is4k) currentTags.push('4k');
+      const localUrl = await saveFileLocally(croppedImage, tab === 'gen' ? 'gen' : 'manual', target.url, currentTags.length > 0 ? currentTags : undefined);
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -927,7 +931,9 @@ export default function Home() {
       const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       
       // v12.4: Save Cleanup result to VPS and clean up old file
-      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, ['rbg']);
+      const is4k = !!target.upscaledUrl;
+      const nextTags = is4k ? ['rbg', '4k'] : ['rbg'];
+      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, nextTags);
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -987,7 +993,9 @@ export default function Home() {
       
       const target = (tab === 'gen' ? generatedImages : manualImages)[idx];
       // v12.4: Save Refinement result to VPS and clean up old file
-      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, ['rbg']);
+      const is4k = !!target.upscaledUrl;
+      const nextTags = is4k ? ['rbg', '4k'] : ['rbg'];
+      const localUrl = await saveFileLocally(resultUrl, tab === 'gen' ? 'gen' : 'manual', target.url, nextTags);
       
       if (tab === 'gen') {
         setGeneratedImages(prev => {
@@ -1234,11 +1242,17 @@ export default function Home() {
         if (!res.ok) throw new Error(data.error);
 
         // v12.4: Core replacement logic - upscale replaces the current active image (url)
+        const is4k = type === 'upscale' || !!target.upscaledUrl;
+        const isRbg = type === 'remove_bg' || target.isBackgroundRemoved;
+        const currentTags = [];
+        if (isRbg) currentTags.push('rbg');
+        if (is4k) currentTags.push('4k');
+
         const localPath = await saveFileLocally(
           data.imageUrl, 
           'manual', 
           type === 'remove_bg' ? target.url : (target.upscaledUrl || target.url),
-          [type === 'remove_bg' ? 'rbg' : '4k']
+          currentTags
         );
 
         if (type === "remove_bg") {
@@ -1292,7 +1306,8 @@ export default function Home() {
               const data = await res.json();
               if (res.ok) {
                 // v12.4: Save Batch Rembg to VPS
-                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url, ['rbg']);
+                const is4k = !!img.upscaledUrl;
+                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.url, is4k ? ['rbg', '4k'] : ['rbg']);
 
                 setManualImages(prev => {
                   const updated = [...prev];
@@ -1314,7 +1329,8 @@ export default function Home() {
               const data = await res.json();
               if (res.ok) {
                 // v12.4: Core replacement logic - upscale replaces current image in batch mode
-                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl || img.url, ['4k']);
+                const isManualRbg = img.isBackgroundRemoved;
+                const localPath = await saveFileLocally(data.imageUrl, 'manual', img.upscaledUrl || img.url, isManualRbg ? ['rbg', '4k'] : ['4k']);
 
                 setManualImages(prev => {
                   const updated = [...prev];
