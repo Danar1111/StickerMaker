@@ -43,10 +43,10 @@ import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
 const MODES = [
+  { id: "sticker-maker", name: "Direct Sticker", desc: "Native Transparent (Cheap & Fast)", icon: Zap },
   { id: "standard", name: "Standard", desc: "Fast & budget-friendly", icon: ImageIcon },
   { id: "premium", name: "Premium", desc: "High fidelity details", icon: Sparkles },
   { id: "artistic", name: "Artistic", desc: "Highly stylized & unique", icon: Wand2 },
-  { id: "sticker-maker", name: "Direct Sticker", desc: "Native Transparent (Cheap & Fast)", icon: Zap },
 ];
 
 const STYLES = [
@@ -230,7 +230,7 @@ export default function Home() {
   // Generator State
   const [prompt, setPrompt] = useState("");
   const [batchSize, setBatchSize] = useState(1);
-  const [mode, setMode] = useState("premium");
+  const [mode, setMode] = useState("sticker-maker");
   const [artStyle, setArtStyle] = useState("3D Render");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<{ url: string, isUpscaling?: boolean, upscaledUrl?: string }[]>([]);
