@@ -46,6 +46,7 @@ const MODES = [
   { id: "standard", name: "Standard", desc: "Fast & budget-friendly", icon: ImageIcon },
   { id: "premium", name: "Premium", desc: "High fidelity details", icon: Sparkles },
   { id: "artistic", name: "Artistic", desc: "Highly stylized & unique", icon: Wand2 },
+  { id: "sticker-maker", name: "Direct Sticker", desc: "Native Transparent (Cheap & Fast)", icon: Zap },
 ];
 
 const STYLES = [
@@ -652,22 +653,28 @@ export default function Home() {
         setProgressText(`Mendinginkan API (10s)...`);
         await new Promise(r => setTimeout(r, 10000));
 
-        setProgressText(`Hapus BG [${i + 1}/${batchSize}]...`);
-        const bgRes = await fetch('/api/generate', {
-          method: 'POST',
-          headers: API_HEADERS,
-          body: JSON.stringify({
-            action: "remove_bg",
-            imageUrl: genData.imageUrl,
-            rembgModel: rembgModel
-          }),
-        });
-        const bgData = await bgRes.json();
-        if (!bgRes.ok) throw new Error(bgData.error);
+        let finalUrl = genData.imageUrl;
+
+        // Skip RemBG for Direct Sticker mode as it is natively transparent
+        if (mode !== "sticker-maker") {
+          setProgressText(`Hapus BG [${i + 1}/${batchSize}]...`);
+          const bgRes = await fetch('/api/generate', {
+            method: 'POST',
+            headers: API_HEADERS,
+            body: JSON.stringify({
+              action: "remove_bg",
+              imageUrl: genData.imageUrl,
+              rembgModel: rembgModel
+            }),
+          });
+          const bgData = await bgRes.json();
+          if (!bgRes.ok) throw new Error(bgData.error);
+          finalUrl = bgData.imageUrl;
+        }
 
         // v12.3: Save to local VPS immediately
         setProgressText(`Menyimpan ke VPS [${i + 1}/${batchSize}]...`);
-        const localPath = await saveFileLocally(bgData.imageUrl, 'gen', undefined, ['rbg']);
+        const localPath = await saveFileLocally(finalUrl, 'gen', undefined, ['rbg']);
 
         const newSticker = { url: localPath };
         setGeneratedImages(prev => [newSticker, ...prev]);

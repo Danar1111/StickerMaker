@@ -57,7 +57,7 @@ async function fetchImageAsBase64(url: string): Promise<string> {
             throw new Error("Gagal membaca file lokal untuk AI.");
         }
     }
-    
+
     return new Promise((resolve, reject) => {
         https.get(url, (res) => {
             if (res.statusCode !== 200) {
@@ -89,17 +89,17 @@ async function runReplicateModel(owner: string, name: string, input: any, token:
             body: JSON.stringify({ input })
         }
     );
-    
+
     // v12.2 Enhanced Error Check
     if (status >= 400 || !initData || !initData.urls) {
         const errMsg = initData?.detail || initData?.error || (typeof initData === 'string' ? initData : JSON.stringify(initData));
         console.error(`[Replicate] Failed to start model ${owner}/${name}:`, initData);
         throw new Error(`Replicate Error (${status}): ${errMsg}`);
     }
-    
+
     let predictionUrl = initData.urls.get;
     console.log(`[Replicate] Model started. Status: ${status}, Prediction ID: ${initData.id}`);
-    
+
     while (true) {
         const { data: pollData } = await httpsRequest(predictionUrl, {
             headers: { "Authorization": `Token ${token}` }
@@ -111,7 +111,7 @@ async function runReplicateModel(owner: string, name: string, input: any, token:
 }
 
 async function runReplicate(version: string, input: any, token: string) {
-    console.log(`[Replicate] Starting version-based prediction: ${version.substring(0,8)}...`);
+    console.log(`[Replicate] Starting version-based prediction: ${version.substring(0, 8)}...`);
     const { status, data: initData } = await httpsRequest(
         "https://api.replicate.com/v1/predictions",
         {
@@ -126,13 +126,13 @@ async function runReplicate(version: string, input: any, token: string) {
 
     if (status >= 400 || !initData || !initData.urls) {
         const errMsg = initData?.detail || initData?.error || (typeof initData === 'string' ? initData : JSON.stringify(initData));
-        console.error(`[Replicate] Failed to start version ${version.substring(0,8)}...:`, initData);
+        console.error(`[Replicate] Failed to start version ${version.substring(0, 8)}...:`, initData);
         throw new Error(`Replicate Error (${status}): ${errMsg}`);
     }
-    
+
     let predictionUrl = initData.urls.get;
     console.log(`[Replicate] Version prediction started. Status: ${status}, Prediction ID: ${initData.id}`);
-    
+
     while (true) {
         const { data: pollData } = await httpsRequest(predictionUrl, {
             headers: { "Authorization": `Token ${token}` }
@@ -169,7 +169,7 @@ export async function POST(req: Request) {
     try {
         const body = await req.json();
         const { action, prompt, mode, artStyle, imageUrl } = body;
-        
+
         const replicateToken = process.env.REPLICATE_API_TOKEN;
         const openaiKey = process.env.OPENAI_API_KEY;
         const adminPin = process.env.ADMIN_PIN;
@@ -177,14 +177,14 @@ export async function POST(req: Request) {
 
         // --- SISTEM KEAMANAN PIN RAHASIA (MANDATORY) ---
         if (!adminPin) {
-            return NextResponse.json({ 
-                error: "KESALAHAN KONFIGURASI VPS: Anda belum memasukkan 'ADMIN_PIN' di file .env.local pada server VPS Anda. Mohon isi PIN dan restart PM2." 
+            return NextResponse.json({
+                error: "KESALAHAN KONFIGURASI VPS: Anda belum memasukkan 'ADMIN_PIN' di file .env.local pada server VPS Anda. Mohon isi PIN dan restart PM2."
             }, { status: 500 });
         }
 
         if (requestedPin !== adminPin) {
-            return NextResponse.json({ 
-                error: "AKSES DITOLAK: PIN Administrator salah atau sesi Anda telah berakhir. Silakan Logout dan Login kembali." 
+            return NextResponse.json({
+                error: "AKSES DITOLAK: PIN Administrator salah atau sesi Anda telah berakhir. Silakan Logout dan Login kembali."
             }, { status: 401 });
         }
 
@@ -204,7 +204,7 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
 3. OUTLINE: The subject MUST be wrapped in a thick, crisp, solid pure white contour border.
 4. BACKGROUND: The background MUST be PURE SOLID BLACK (#000000). Do not use any other colors for the background.
 5. NO EFFECTS: Strictly NO drop shadows, NO outer glows, NO colored vignettes, NO 3D shading, and NO gradients.`;
-            
+
             let rawImageUrl = "";
 
             if (mode === "premium") {
@@ -213,23 +213,39 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             } else if (mode === "artistic") {
                 const fluxOutput = await runReplicateModel("black-forest-labs", "flux-schnell", { prompt: enhancedPrompt }, replicateToken);
                 rawImageUrl = Array.isArray(fluxOutput) ? fluxOutput[0] : fluxOutput;
+            } else if (mode === "sticker-maker") {
+                // v15.0: Native Transparent Sticker Maker (Direct PNG with Alpha)
+                // Cost: ~$0.0045, No RemBG needed.
+                const stickerOutput = await runReplicate(
+                    "4acb778eb059772225ec213948f0660867b2e03f277448f18cf1800b96a65a1a",
+                    {
+                        prompt: prompt,
+                        negative_prompt: "bubbles, watermark, blurry, low quality, distorted, ugly, grainy, low resolution, speech bubbles",
+                        width: 1024,
+                        height: 1024,
+                        num_outputs: 1,
+                        upscale: true
+                    },
+                    replicateToken
+                );
+                rawImageUrl = Array.isArray(stickerOutput) ? stickerOutput[0] : stickerOutput;
             } else {
                 rawImageUrl = await runReplicate(
-                   "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b", 
-                   { prompt: enhancedPrompt }, 
-                   replicateToken
+                    "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+                    { prompt: enhancedPrompt },
+                    replicateToken
                 );
                 rawImageUrl = Array.isArray(rawImageUrl) ? rawImageUrl[0] : rawImageUrl;
             }
 
             return NextResponse.json({ imageUrl: rawImageUrl });
-        } 
-        
+        }
+
         else if (action === "remove_bg") {
             const { rembgModel } = body;
             const payloadSize = imageUrl ? Math.round(imageUrl.length / 1024) : 0;
             console.log(`[API] Action: remove_bg, Model: ${rembgModel}, Payload Size: ${payloadSize} KB`);
-            
+
             // v12.4: Ensure source is fetched locally (supports Replicate + local VPS storage)
             let finalImageSource = imageUrl;
             if (imageUrl.includes('replicate.delivery') || imageUrl.includes('/api/storage/view/')) {
@@ -241,7 +257,7 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             }
 
             // Standard (Original) vs Smart (InSPyReNet)
-            const rembgModelVersion = rembgModel === 'smart' 
+            const rembgModelVersion = rembgModel === 'smart'
                 ? "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc"
                 : "fb8af171cfa1616ddcf1242c093f9c46bcada5ad4cf6f2fbe8b81b330ec5c003";
 
@@ -258,8 +274,8 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
             if (!prompt) return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
 
             // Recraft V4 SVG Models on Replicate
-            const modelName = isPro 
-                ? "recraft-v4-pro-svg" 
+            const modelName = isPro
+                ? "recraft-v4-pro-svg"
                 : "recraft-v4-svg";
 
             // V4 is prompt-driven, so we bake the style into the prompt
@@ -281,7 +297,7 @@ CRITICAL REQUIREMENTS DO NOT IGNORE:
 
         else if (action === "upscale") {
             console.log(`[API] Action: upscale, URL: ${imageUrl?.substring(0, 50)}...`);
-            
+
             // v12.4: Ensure source is fetched locally (supports Replicate + local VPS storage)
             let finalImageSource = imageUrl;
             if (imageUrl.includes('replicate.delivery') || imageUrl.includes('/api/storage/view/')) {
